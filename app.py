@@ -6,7 +6,7 @@ from translate import Translator
 st.set_page_config(page_title="PoliSci Newsticker", page_icon="📚", layout="centered")
 
 # --- TELEGRAM-ZUGANGSDATEN ---
-BOT_TOKEN = "8399810274:AAH13qCGE2zsanhb25VcgfNxtSmv324fPdA"
+TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = "6804282333"
 
 def sende_telegram_paper(eintrag):
