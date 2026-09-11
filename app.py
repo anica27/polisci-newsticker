@@ -5,59 +5,43 @@ from translate import Translator
 
 st.set_page_config(page_title="PoliSci Newsticker", page_icon="📚", layout="centered")
 
-# --- TELEGRAM-ZUGANGSDATEN ---
-TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID = "st.secrets["TELEGRAM_CHAT_ID"]
+# --- TELEGRAM-VERSANDFUNKTION ---
 
-def sende_telegram_paper(eintrag):
-    """Formatiert ein Paper und sendet es via Telegram Bot API."""
-    if not BOT_TOKEN or not CHAT_ID or BOT_TOKEN.startswith("DEIN_"):
-        return False, "Zugangsdaten fehlen."
-    
-    titel = eintrag.get("title", "Kein Titel")
-    datum = eintrag.get("publication_date", "Datum unbekannt")
-    autoren_liste = [a["author"]["display_name"] for a in eintrag.get("authorships", [])]
-    autoren = ", ".join(autoren_liste[:3]) + (" et al." if len(autoren_liste) > 3 else "")
-    
-    ort = eintrag.get("primary_location") or {}
-    journal = (ort.get("source") or {}).get("display_name", "Fachjournal")
-    link = eintrag.get("doi") or ort.get("landing_page_url")
-    oa_status = "🟢 Open Access" if eintrag.get("open_access", {}).get("is_oa") else "🔒 Paywall"
+def sende_telegram_nachricht(nachricht_text):
+    """Sendet eine formatierte Nachricht sicher via Telegram Bot API."""
+    try:
+        bot_token = st.secrets["TELEGRAM_BOT_TOKEN"]
+        chat_id = st.secrets["TELEGRAM_CHAT_ID"]
+    except KeyError:
+        st.error("Telegram-Zugangsdaten fehlen in den Streamlit Secrets.")
+        return False
 
-    text = (
-        f"📚 <b>Neues politikwissenschaftliches Paper</b>\n\n"
-        f"<b>{titel}</b>\n\n"
-        f"✍️ <i>{autoren or 'Unbekannte Autor:innen'}</i>\n"
-        f"📖 <i>{journal}</i> ({datum}) • {oa_status}"
-    )
-    
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
-        "chat_id": CHAT_ID,
-        "text": text,
+        "chat_id": chat_id,
+        "text": nachricht_text,
         "parse_mode": "HTML",
         "disable_web_page_preview": False
     }
-    if link:
-        payload["reply_markup"] = {
-            "inline_keyboard": [[{"text": "Zum Volltext / Verlag ↗", "url": link}]]
-        }
-
     try:
-        res = requests.post(url, json=payload, timeout=10)
-        return res.status_code == 200, res.text
+        res = requests.post(url, json=payload, timeout=8)
+        res.raise_for_status()
+        return True
     except Exception as e:
-        return False, str(e)
+        st.error(f"Telegram-Fehler: {e}")
+        return False
 
-# --- CACHING- & HILFSFUNKTIONEN ---
+# --- HILFSFUNKTIONEN (CACHING & TEXTVERARBEITUNG) ---
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def lade_daten_von_api(url, params):
+    """Holt Daten von OpenAlex und speichert das Ergebnis für 1 Stunde im Cache."""
     res = requests.get(url, params=params, timeout=12)
     res.raise_for_status()
     return res.json().get("results", [])
 
 def rekonstruiere_abstract(inverted_index):
+    """Rekonstruiert den Fließtext aus dem Inverted Index von OpenAlex."""
     if not inverted_index or not isinstance(inverted_index, dict):
         return None
     wort_positionen = []
@@ -69,6 +53,7 @@ def rekonstruiere_abstract(inverted_index):
 
 @st.cache_data(show_spinner=False)
 def uebersetze_ins_deutsche(text):
+    """Übersetzt das Abstract blockweise ins Deutsche."""
     if not text:
         return ""
     try:
@@ -83,14 +68,18 @@ def uebersetze_ins_deutsche(text):
                 aktueller_block = satz + ". "
         if aktueller_block:
             bloecke.append(aktueller_block)
-        return " ".join([tr.translate(b) for b in bloecke])
-    except Exception:
-        return "Übersetzung nicht verfügbar."
 
-# --- OBERFLÄCHE ---
+        uebersetzte_bloecke = [tr.translate(b) for b in bloecke]
+        return " ".join(uebersetzte_bloecke)
+    except Exception:
+        return "Übersetzung konnte nicht geladen werden. Bitte das englische Original lesen."
+
+# --- HAUPTSEITE ---
 
 st.title("📚 PoliSci Newsticker")
-st.caption("Internationale Fachpublikationen mit variablen Filtern & Telegram-Push.")
+st.caption("Aktuelle internationale politikwissenschaftliche Veröffentlichungen.")
+
+# --- SEITENLEISTE (FILTER) ---
 
 SACHGEBIETE = {
     "Alle Sachgebiete": None,
@@ -101,21 +90,20 @@ SACHGEBIETE = {
     "Europäische Union & Regionalintegration": "topics/T10294",
 }
 
-# --- SEITENLEISTE: FILTER ---
 st.sidebar.header("🔍 Filteroptionen")
 suchbegriff = st.sidebar.text_input("Schlagwortsuche:", placeholder="z. B. Wahlsystem, Populismus...")
 gewaehltes_gebiet = st.sidebar.selectbox("Sachgebiet eingrenzen:", list(SACHGEBIETE.keys()))
 tage_zurueck = st.sidebar.slider("Zeitraum (letzte X Tage):", min_value=7, max_value=60, value=30)
-anzahl = st.sidebar.slider("Anzahl der Einträge:", min_value=3, max_value=20, value=5)
+anzahl = st.sidebar.slider("Anzahl der Einträge:", min_value=5, max_value=25, value=10)
 
 nur_oa = st.sidebar.checkbox("Nur Open Access (frei lesbar)")
 nur_mit_abstract = st.sidebar.checkbox("Nur Papers mit Zusammenfassung anzeigen", value=True)
 
-# Datumsfenster
+# Datumsfenster berechnen
 heute = datetime.date.today().strftime("%Y-%m-%d")
 start_datum = (datetime.date.today() - datetime.timedelta(days=tage_zurueck)).strftime("%Y-%m-%d")
 
-# Parameter aufbauen
+# Filter-Parameter für OpenAlex
 filter_regeln = [
     "primary_location.source.type:journal",
     "language:de|en",
@@ -155,37 +143,36 @@ if suchbegriff.strip():
     except Exception:
         query_params["search"] = f'"{orig}"'
 
-# --- DATEN ABRUFEN ---
+# --- DATENABRUF ---
+
 with st.spinner("Lade Publikationen..."):
     try:
         treffer = lade_daten_von_api("https://api.openalex.org/works", query_params)
     except Exception as e:
-        st.error(f"Fehler beim Abruf: {e}")
+        st.error(f"Fehler beim Laden der Publikationen: {e}")
         treffer = []
 
-# --- TELEGRAM PUSH BEREICH ---
-with st.sidebar:
-    st.divider()
-    st.subheader("📲 Aufs Smartphone")
-    st.caption("Sendet die oben gefilterten Einträge sofort per Push an deinen Telegram-Bot.")
-    
-    if st.button("🚀 Gefilterte Paper an Telegram senden", disabled=len(treffer) == 0):
-        erfolge = 0
-        with st.spinner("Sende Benachrichtigungen..."):
-            for eintrag in treffer:
-                ok, _ = sende_telegram_paper(eintrag)
-                if ok:
-                    erfolge += 1
-        if erfolge > 0:
-            st.success(f"{erfolge} Paper erfolgreich aufs Handy geschickt!")
-        else:
-            st.error("Fehler beim Versand. Bitte Token und Chat-ID prüfen.")
-
-# --- FEED-ANZEIGE ---
 st.markdown(f"**Gefundene Veröffentlichungen:** {len(treffer)}")
 
+# --- TELEGRAM-SAMMELVERSAND IN DER SIDEBAR ---
+if treffer:
+    st.sidebar.divider()
+    st.sidebar.subheader("📲 Telegram Push")
+    if st.sidebar.button("Top 5 Treffer an Telegram senden"):
+        nachrichten_teile = [f"<b>📚 PoliSci Newsticker: Top-Funde</b>\n<i>Filter: {gewaehltes_gebiet}</i>\n"]
+        for p in treffer[:5]:
+            p_titel = p.get("title", "Kein Titel")
+            p_link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or "Kein Link"
+            nachrichten_teile.append(f"• <b>{p_titel}</b>\n  🔗 <a href='{p_link}'>Zum Artikel</a>")
+        
+        gesamt_text = "\n\n".join(nachrichten_teile)
+        if sende_telegram_nachricht(gesamt_text):
+            st.sidebar.success("Nachricht erfolgreich an Telegram gesendet!")
+
 if not treffer:
-    st.warning("Keine Treffer im gewählten Zeitraum.")
+    st.warning("Keine Treffer im gewählten Zeitraum. Probiere einen größeren Zeitraum oder ein anderes Schlagwort.")
+
+# --- FEED ANZEIGEN ---
 
 for idx, eintrag in enumerate(treffer):
     titel = eintrag.get("title", "Kein Titel")
@@ -201,34 +188,46 @@ for idx, eintrag in enumerate(treffer):
     link = eintrag.get("doi") or ort.get("landing_page_url")
     oa_badge = "🟢 Open Access" if eintrag.get("open_access", {}).get("is_oa", False) else "🔒 Paywall"
 
+    abstract_text = rekonstruiere_abstract(eintrag.get("abstract_inverted_index"))
+
     with st.container():
         st.markdown(f"### {titel}")
         st.caption(f"📌 {topic_name} • 🌐 {sprache} • {oa_badge}")
         st.markdown(f"**Autor:innen:** {autoren}")
         st.markdown(f"**Erschienen am:** `{datum}` in *{journal}*")
         
-        col1, col2 = st.columns([2, 1])
-        with col1:
+        # Aktions-Buttons nebeneinander
+        col_link, col_telegram = st.columns([1, 1])
+        with col_link:
             if link:
-                st.link_button("Zum Volltext / zur Verlagsseite ↗", link)
-        with col2:
-            if st.button("📲 Nur dieses Paper senden", key=f"tg_single_{idx}"):
-                ok, _ = sende_telegram_paper(eintrag)
-                if ok:
-                    st.toast("Paper an Telegram geschickt!", icon="✅")
-                else:
-                    st.toast("Versand fehlgeschlagen.", icon="⚠️")
+                st.link_button("Zum Volltext / Verlag ↗", link)
+            else:
+                st.caption("Kein Direktlink vorhanden.")
         
-        abstract_text = rekonstruiere_abstract(eintrag.get("abstract_inverted_index"))
+        with col_telegram:
+            if st.button("📲 Paper an Telegram senden", key=f"tg_{idx}"):
+                text_block = (
+                    f"<b>📚 PoliSci Neuzugang</b>\n\n"
+                    f"<b>Titel:</b> {titel}\n"
+                    f"<b>Autor:innen:</b> {autoren}\n"
+                    f"<b>Journal:</b> {journal} ({datum})\n"
+                    f"<b>Link:</b> <a href='{link}'>{link}</a>"
+                )
+                if sende_telegram_nachricht(text_block):
+                    st.success("Erfolgreich gesendet!")
+
+        # Zusammenfassung zum Aufklappen
         if abstract_text:
             with st.expander("📖 Zusammenfassung lesen"):
                 st.markdown("**Originaltext:**")
                 st.write(abstract_text)
+                
                 if sprache != "DE":
                     st.divider()
                     if st.checkbox("Auf Deutsch übersetzen", key=f"trans_{idx}"):
                         with st.spinner("Übersetze..."):
                             dt_text = uebersetze_ins_deutsche(abstract_text)
+                            st.markdown("**Deutsche Fassung:**")
                             st.info(dt_text)
         else:
             st.caption("ℹ️ Keine Zusammenfassung beim Verlag hinterlegt.")
