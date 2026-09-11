@@ -7,7 +7,7 @@ st.set_page_config(page_title="PoliSci Newsticker", page_icon="📚", layout="ce
 
 # --- TELEGRAM-ZUGANGSDATEN ---
 TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
-CHAT_ID = "6804282333"
+TELEGRAM_CHAT_ID = "st.secrets["TELEGRAM_CHAT_ID"]
 
 def sende_telegram_paper(eintrag):
     """Formatiert ein Paper und sendet es via Telegram Bot API."""
