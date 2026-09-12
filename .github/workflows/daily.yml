@@ -1,0 +1,29 @@
+name: Tägliche Publikationen senden
+
+on:
+  schedule:
+    # 07:00 UTC entspricht 08:00 bzw. 09:00 Uhr deutscher Zeit
+    - cron: '0 7 * * *'
+  # Erlaubt manuelles Testen per Knopfdruck auf GitHub
+  workflow_dispatch:
+
+jobs:
+  post-to-telegram:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Abhängigkeiten installieren
+        run: pip install requests
+
+      - name: Skript ausführen
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python daily_poster.py
