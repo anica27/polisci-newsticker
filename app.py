@@ -1,19 +1,20 @@
 import datetime
+import html
 import streamlit as st
 import requests
 from translate import Translator
 
 st.set_page_config(page_title="PoliSci Newsticker", page_icon="📚", layout="centered")
 
-# --- TELEGRAM-VERSANDFUNKTION ---
+# --- TELEGRAM-VERSANDFUNKTION MIT DETAIL-DIAGNOSE ---
 
 def sende_telegram_nachricht(nachricht_text):
-    """Sendet eine formatierte Nachricht sicher via Telegram Bot API."""
+    """Sendet eine formatierte Nachricht via Telegram Bot API mit detaillierter Fehleranzeige."""
     try:
         bot_token = st.secrets["TELEGRAM_BOT_TOKEN"]
         chat_id = st.secrets["TELEGRAM_CHAT_ID"]
-    except KeyError:
-        st.error("Telegram-Zugangsdaten fehlen in den Streamlit Secrets.")
+    except KeyError as e:
+        st.error(f"Fehlendes Secret in Streamlit Settings: {e}")
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -23,12 +24,21 @@ def sende_telegram_nachricht(nachricht_text):
         "parse_mode": "HTML",
         "disable_web_page_preview": False
     }
+
     try:
         res = requests.post(url, json=payload, timeout=8)
-        res.raise_for_status()
+        if not res.ok:
+            # Zeigt die genaue Ursache von Telegram an (z. B. "chat not found", "not enough rights")
+            try:
+                antwort = res.json()
+                grund = antwort.get("description", res.text)
+            except Exception:
+                grund = res.text
+            st.error(f"Telegram-Fehler ({res.status_code}): {grund}")
+            return False
         return True
     except Exception as e:
-        st.error(f"Telegram-Fehler: {e}")
+        st.error(f"Verbindungsfehler zu Telegram: {e}")
         return False
 
 # --- HILFSFUNKTIONEN (CACHING & TEXTVERARBEITUNG) ---
@@ -159,11 +169,15 @@ if treffer:
     st.sidebar.divider()
     st.sidebar.subheader("📲 Telegram Push")
     if st.sidebar.button("Top 5 Treffer an Telegram senden"):
-        nachrichten_teile = [f"<b>📚 PoliSci Newsticker: Top-Funde</b>\n<i>Filter: {gewaehltes_gebiet}</i>\n"]
+        gebiet_safe = html.escape(gewaehltes_gebiet)
+        nachrichten_teile = [f"<b>📚 PoliSci Newsticker: Top-Funde</b>\n<i>Filter: {gebiet_safe}</i>\n"]
         for p in treffer[:5]:
-            p_titel = p.get("title", "Kein Titel")
-            p_link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or "Kein Link"
-            nachrichten_teile.append(f"• <b>{p_titel}</b>\n  🔗 <a href='{p_link}'>Zum Artikel</a>")
+            p_titel = html.escape(p.get("title") or "Kein Titel")
+            p_link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
+            if p_link:
+                nachrichten_teile.append(f"• <b>{p_titel}</b>\n  🔗 <a href='{p_link}'>Zum Artikel</a>")
+            else:
+                nachrichten_teile.append(f"• <b>{p_titel}</b>")
         
         gesamt_text = "\n\n".join(nachrichten_teile)
         if sende_telegram_nachricht(gesamt_text):
@@ -175,8 +189,8 @@ if not treffer:
 # --- FEED ANZEIGEN ---
 
 for idx, eintrag in enumerate(treffer):
-    titel = eintrag.get("title", "Kein Titel")
-    datum = eintrag.get("publication_date", "Unbekannt")
+    titel = eintrag.get("title") or "Kein Titel"
+    datum = eintrag.get("publication_date") or "Unbekannt"
     sprache = eintrag.get("language", "en").upper()
     topic_name = (eintrag.get("primary_topic") or {}).get("display_name", "Politikwissenschaft")
     
@@ -206,13 +220,20 @@ for idx, eintrag in enumerate(treffer):
         
         with col_telegram:
             if st.button("📲 Paper an Telegram senden", key=f"tg_{idx}"):
+                # Sonderzeichen maskieren, damit Telegram-HTML nicht bricht
+                titel_safe = html.escape(titel)
+                autoren_safe = html.escape(autoren)
+                journal_safe = html.escape(journal)
+                
                 text_block = (
                     f"<b>📚 PoliSci Neuzugang</b>\n\n"
-                    f"<b>Titel:</b> {titel}\n"
-                    f"<b>Autor:innen:</b> {autoren}\n"
-                    f"<b>Journal:</b> {journal} ({datum})\n"
-                    f"<b>Link:</b> <a href='{link}'>{link}</a>"
+                    f"<b>Titel:</b> {titel_safe}\n"
+                    f"<b>Autor:innen:</b> {autoren_safe}\n"
+                    f"<b>Journal:</b> {journal_safe} ({datum})\n"
                 )
+                if link:
+                    text_block += f"<b>Link:</b> <a href='{link}'>{link}</a>"
+                
                 if sende_telegram_nachricht(text_block):
                     st.success("Erfolgreich gesendet!")
 
