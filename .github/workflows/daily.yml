@@ -2,10 +2,12 @@ name: Tägliche Publikationen senden
 
 on:
   schedule:
-    # 07:00 UTC entspricht 08:00 bzw. 09:00 Uhr deutscher Zeit
+    # 07:00 UTC entspricht morgens deutscher Zeit
     - cron: '0 7 * * *'
-  # Erlaubt manuelles Testen per Knopfdruck auf GitHub
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   post-to-telegram:
@@ -27,3 +29,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python daily_poster.py
+
+      - name: Gesehene IDs ins Repository committen
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_ids.txt || true
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto: seen_ids.txt aktualisiert" && git push)
