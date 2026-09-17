@@ -8,42 +8,43 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 APP_URL = "https://polisci-ticker.streamlit.app"
 SEEN_FILE = "seen_ids.txt"
 
-# Zuordnung der Fachkanäle – strikt verankert in Politikwissenschaft (Subfield 3320)
+# 3312 = Sociology and Political Science (3320 war Medizin/Health!)
+POLISCI_SUBFIELD = "primary_topic.subfield.id:subfields/3312"
+
 KANAELE = [
     {
         "titel": "Allgemeiner Überblick",
         "chat_id": os.environ.get("TELEGRAM_CHAT_ID"),
-        "filter_extra": "primary_topic.subfield.id:subfields/3320",
-        "anzahl": 5
+        "filter_extra": POLISCI_SUBFIELD,
+        "ziel_anzahl": 10
     },
     {
         "titel": "Internationale Beziehungen & Außenpolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
-        "filter_extra": "primary_topic.subfield.id:subfields/3320,primary_topic.id:topics/T10053",
-        "anzahl": 5
+        "filter_extra": f"{POLISCI_SUBFIELD},primary_topic.id:topics/T10053",
+        "ziel_anzahl": 10
     },
     {
         "titel": "Vergleichende Regierungslehre & Wahlsysteme",
         "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
-        "filter_extra": "primary_topic.subfield.id:subfields/3320,primary_topic.id:topics/T10108",
-        "anzahl": 5
+        "filter_extra": f"{POLISCI_SUBFIELD},primary_topic.id:topics/T10108",
+        "ziel_anzahl": 10
     },
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # Verhindert Fehl-Klassifizierungen aus Medizin/Biologie
-        "filter_extra": "primary_topic.subfield.id:subfields/3320,primary_topic.field.id:fields/33",
-        "anzahl": 5
+        # Strikt an Sozialwissenschaften gebunden: keine Medizin/Naturwissenschaften
+        "filter_extra": f"{POLISCI_SUBFIELD},primary_topic.field.id:fields/33",
+        "ziel_anzahl": 10
     },
     {
         "titel": "Public Policy & Verwaltungswissenschaft",
         "chat_id": os.environ.get("CHAT_ID_POLICY"),
-        "filter_extra": "primary_topic.subfield.id:subfields/3320,primary_topic.id:topics/T10289",
-        "anzahl": 5
+        "filter_extra": f"{POLISCI_SUBFIELD},primary_topic.id:topics/T10289",
+        "ziel_anzahl": 10
     }
 ]
 
-# Titel, die typischerweise auf Beiwerke oder Buchteile hinweisen
 UNERWUENSCHTE_TITEL = {
     "conclusion", "conclusions", "introduction", "preface", "index", 
     "contents", "editorial", "book reviews", "front matter", "back matter"
@@ -57,8 +58,8 @@ def lade_gesehene_ids():
 
 def speichere_neue_ids(bestehende_ids, neue_ids):
     aktualisiert = list(bestehende_ids) + list(neue_ids)
-    if len(aktualisiert) > 1000:
-        aktualisiert = aktualisiert[-1000:]
+    if len(aktualisiert) > 2000:
+        aktualisiert = aktualisiert[-2000:]
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
         for item_id in aktualisiert:
             f.write(f"{item_id}\n")
@@ -80,15 +81,20 @@ gesamt_neue_ids = []
 
 heute = datetime.date.today()
 datum_str = heute.strftime("%d.%m.%Y")
-start = (heute - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+start = (heute - datetime.timedelta(days=10)).strftime("%Y-%m-%d")
 
-# 2. Schleife über alle Fachkanäle
+# Chat-IDs deduplizieren, damit keine ID doppelt beliefert wird
+bereits_belieferte_chats = set()
+
 for kanal in KANAELE:
     chat_id = kanal["chat_id"]
     if not chat_id or not BOT_TOKEN:
         continue
+    if chat_id in bereits_belieferte_chats:
+        # Verhindert die Doppel-Nachricht im Hauptkanal
+        continue
+    bereits_belieferte_chats.add(chat_id)
 
-    # Strenge Filter: Nur echte Zeitschriftenartikel, kein Paratext, mit Abstract, DE oder EN
     filter_string = (
         f"type:article,"
         f"primary_location.source.type:journal,"
@@ -102,13 +108,14 @@ for kanal in KANAELE:
     params = {
         "filter": filter_string,
         "sort": "publication_date:desc",
-        "per_page": 40
+        "per_page": 80
     }
 
     try:
         res = requests.get("https://api.openalex.org/works", params=params, timeout=15)
         roh_treffer = res.json().get("results", [])
-    except Exception:
+    except Exception as e:
+        print(f"Fehler beim Abruf für {kanal['titel']}: {e}")
         continue
 
     bereinigte_treffer = []
@@ -122,33 +129,32 @@ for kanal in KANAELE:
 
         if not p_id or not titel_raw:
             continue
-        # Fragmente wie "Conclusion" oder Einzelseiten ausfiltern
         if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
             continue
         if p_id in gesehene_ids or p_id in gesamt_neue_ids:
             continue
 
-        # Maximal 1 Artikel pro Journal pro Tag und Kanal (strikte Diversität)
+        # Maximal 2 Artikel pro Journal für gute Streuung
         if journal_id:
-            if journal_counter.get(journal_id, 0) >= 1:
+            if journal_counter.get(journal_id, 0) >= 2:
                 continue
             journal_counter[journal_id] = journal_counter.get(journal_id, 0) + 1
 
         bereinigte_treffer.append(p)
         gesamt_neue_ids.append(p_id)
 
-        if len(bereinigte_treffer) == kanal["anzahl"]:
+        if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
             break
 
-    # Versand an den jeweiligen Kanal
+    # Versand an den Zielkanal
     if bereinigte_treffer:
-        parts = [f"<b>📢 PoliSci Ticker: {kanal['titel']}</b>\n<i>Ausgabe vom {datum_str}:</i>\n"]
+        parts = [f"<b>📢 PoliSci Ticker: {kanal['titel']}</b>\n<i>Ausgabe vom {datum_str} ({len(bereinigte_treffer)} Papers):</i>\n"]
         
         for idx, p in enumerate(bereinigte_treffer, start=1):
             titel = html.escape(p.get("title") or "Ohne Titel")
             link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
             ist_oa = p.get("open_access", {}).get("is_oa", False)
-            status_badge = "🟢 Open Access" if ist_oa else "🔒 Paywall"
+            status_badge = "🟢 OA" if ist_oa else "🔒 Paywall"
 
             autoren_namen = [a["author"]["display_name"] for a in p.get("authorships", [])]
             if len(autoren_namen) > 2:
@@ -158,20 +164,30 @@ for kanal in KANAELE:
             else:
                 autoren_text = "Unbekannt"
 
-            block = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autoren_text)}</i>\n   {status_badge}"
+            block = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autoren_text)}</i> • {status_badge}"
             if link:
                 block += f" • <a href='{link}'>Link</a>"
             parts.append(block)
 
         parts.append(f"\n🔍 <i>Abstracts, Filter & Übersetzungen in der Web-App:</i>\n👉 <a href='{APP_URL}'>PoliSci Newsticker öffnen</a>")
 
+        nachricht = "\n\n".join(parts)
         try:
-            sende_telegram(chat_id, "\n\n".join(parts))
+            # Falls die Nachricht Telegrams 4096-Zeichen-Limit überschreiten sollte, in 2 Teile splitten
+            if len(nachricht) > 4000:
+                mid = len(parts) // 2
+                teil1 = "\n\n".join(parts[:mid])
+                teil2 = "\n\n".join(parts[mid:])
+                sende_telegram(chat_id, teil1)
+                time.sleep(1)
+                sende_telegram(chat_id, teil2)
+            else:
+                sende_telegram(chat_id, nachricht)
             time.sleep(2)
         except Exception as e:
             print(f"Fehler beim Senden an {kanal['titel']}: {e}")
 
-# 3. Neue IDs sichern
+# 3. Neue IDs persistieren
 if gesamt_neue_ids:
     speichere_neue_ids(gesehene_ids, gesamt_neue_ids)
 
