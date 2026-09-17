@@ -36,3 +36,13 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add seen_ids.txt || true
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto: seen_ids.txt aktualisiert" && git push)
+
+      - name: Skript ausführen
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CHAT_ID_IB: ${{ secrets.CHAT_ID_IB }}
+          CHAT_ID_VERGLEICH: ${{ secrets.CHAT_ID_VERGLEICH }}
+          CHAT_ID_THEORIE: ${{ secrets.CHAT_ID_THEORIE }}
+          CHAT_ID_POLICY: ${{ secrets.CHAT_ID_POLICY }}
+        run: python daily_poster.py
