@@ -18,7 +18,6 @@ def lade_gesehene_ids():
 def speichere_neue_ids(bestehende_ids, neue_ids):
     """Speichert die neuen IDs und begrenzt die Datei auf die letzten 500 Einträge."""
     aktualisierte_liste = list(bestehende_ids) + list(neue_ids)
-    # Begrenzen, damit die Datei über Monate hinweg schlank bleibt
     if len(aktualisierte_liste) > 500:
         aktualisierte_liste = aktualisierte_liste[-500:]
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
@@ -39,7 +38,7 @@ def sende_telegram(text):
 # 1. Bisherige IDs laden
 gesehene_ids = lade_gesehene_ids()
 
-# 2. Publikationen der letzten 5 Tage abrufen (größeres Zeitfenster für lückenlose Treffer)
+# 2. Publikationen der letzten 5 Tage abrufen
 heute = datetime.date.today()
 start = (heute - datetime.timedelta(days=5)).strftime("%Y-%m-%d")
 
@@ -83,6 +82,10 @@ if bereinigte_treffer and BOT_TOKEN and CHAT_ID:
         titel = html.escape(p.get("title") or "Ohne Titel")
         link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
         
+        # Open Access Status ermitteln
+        ist_oa = p.get("open_access", {}).get("is_oa", False)
+        status_badge = "🟢 Open Access" if ist_oa else "🔒 Paywall"
+
         autoren_namen = [a["author"]["display_name"] for a in p.get("authorships", [])]
         if len(autoren_namen) > 2:
             autoren_text = f"{autoren_namen[0]} et al."
@@ -91,7 +94,7 @@ if bereinigte_treffer and BOT_TOKEN and CHAT_ID:
         else:
             autoren_text = "Unbekannt"
 
-        block = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autoren_text)}</i>"
+        block = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autoren_text)}</i>\n   {status_badge}"
         if link:
             block += f" • <a href='{link}'>Link</a>"
         parts.append(block)
