@@ -8,16 +8,11 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 APP_URL = "https://polisci-ticker.streamlit.app"
 SEEN_FILE = "seen_ids.txt"
 
-# 3312 = Sociology and Political Science (3320 war Medizin/Health!)
+# Korrektes Subfield für Politikwissenschaft (3312 = Sociology & Political Science)
 POLISCI_SUBFIELD = "primary_topic.subfield.id:subfields/3312"
 
+# Nur noch die 4 Fachkanäle
 KANAELE = [
-    {
-        "titel": "Allgemeiner Überblick",
-        "chat_id": os.environ.get("TELEGRAM_CHAT_ID"),
-        "filter_extra": POLISCI_SUBFIELD,
-        "ziel_anzahl": 10
-    },
     {
         "titel": "Internationale Beziehungen & Außenpolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
@@ -33,7 +28,6 @@ KANAELE = [
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # Strikt an Sozialwissenschaften gebunden: keine Medizin/Naturwissenschaften
         "filter_extra": f"{POLISCI_SUBFIELD},primary_topic.field.id:fields/33",
         "ziel_anzahl": 10
     },
@@ -75,7 +69,6 @@ def sende_telegram(chat_id, text):
     res = requests.post(url, json=payload, timeout=10)
     res.raise_for_status()
 
-# 1. Bisherige IDs laden
 gesehene_ids = lade_gesehene_ids()
 gesamt_neue_ids = []
 
@@ -83,17 +76,20 @@ heute = datetime.date.today()
 datum_str = heute.strftime("%d.%m.%Y")
 start = (heute - datetime.timedelta(days=10)).strftime("%Y-%m-%d")
 
-# Chat-IDs deduplizieren, damit keine ID doppelt beliefert wird
 bereits_belieferte_chats = set()
 
 for kanal in KANAELE:
-    chat_id = kanal["chat_id"]
+    chat_id = kanal.get("chat_id")
+    
     if not chat_id or not BOT_TOKEN:
+        print(f"Übersprungen: Kein Chat-ID-Secret für '{kanal['titel']}'.")
         continue
+
+    chat_id = str(chat_id).strip()
+
     if chat_id in bereits_belieferte_chats:
-        # Verhindert die Doppel-Nachricht im Hauptkanal
+        print(f"Chat-ID {chat_id} bereits bedient. Überspringe {kanal['titel']}.")
         continue
-    bereits_belieferte_chats.add(chat_id)
 
     filter_string = (
         f"type:article,"
@@ -108,7 +104,7 @@ for kanal in KANAELE:
     params = {
         "filter": filter_string,
         "sort": "publication_date:desc",
-        "per_page": 80
+        "per_page": 60
     }
 
     try:
@@ -134,7 +130,7 @@ for kanal in KANAELE:
         if p_id in gesehene_ids or p_id in gesamt_neue_ids:
             continue
 
-        # Maximal 2 Artikel pro Journal für gute Streuung
+        # Maximal 2 Paper pro Fachjournal und Tag
         if journal_id:
             if journal_counter.get(journal_id, 0) >= 2:
                 continue
@@ -146,7 +142,6 @@ for kanal in KANAELE:
         if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
             break
 
-    # Versand an den Zielkanal
     if bereinigte_treffer:
         parts = [f"<b>📢 PoliSci Ticker: {kanal['titel']}</b>\n<i>Ausgabe vom {datum_str} ({len(bereinigte_treffer)} Papers):</i>\n"]
         
@@ -154,44 +149,31 @@ for kanal in KANAELE:
             titel = html.escape(p.get("title") or "Ohne Titel")
             link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
             ist_oa = p.get("open_access", {}).get("is_oa", False)
-            status_badge = "🟢 OA" if ist_oa else "🔒 Paywall"
+            oa_badge = "🟢 OA" if ist_oa else "🔒 Paywall"
 
-            autoren_namen = [a["author"]["display_name"] for a in p.get("authorships", [])]
-            if len(autoren_namen) > 2:
-                autoren_text = f"{autoren_namen[0]} et al."
-            elif autoren_namen:
-                autoren_text = ", ".join(autoren_namen)
-            else:
-                autoren_text = "Unbekannt"
+            autoren_liste = [a["author"]["display_name"] for a in p.get("authorships", [])]
+            autor_text = f"{autoren_liste[0]} et al." if len(autoren_liste) > 1 else (autoren_liste[0] if autoren_liste else "Unbekannt")
 
-            block = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autoren_text)}</i> • {status_badge}"
+            zeile = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autor_text)}</i> • {oa_badge}"
             if link:
-                block += f" • <a href='{link}'>Link</a>"
-            parts.append(block)
+                zeile += f" • <a href='{link}'>Link</a>"
+            parts.append(zeile)
 
         parts.append(f"\n🔍 <i>Abstracts, Filter & Übersetzungen in der Web-App:</i>\n👉 <a href='{APP_URL}'>PoliSci Newsticker öffnen</a>")
 
-        nachricht = "\n\n".join(parts)
+        gesamte_nachricht = "\n\n".join(parts)
+        
         try:
-            # Falls die Nachricht Telegrams 4096-Zeichen-Limit überschreiten sollte, in 2 Teile splitten
-            if len(nachricht) > 4000:
-                mid = len(parts) // 2
-                teil1 = "\n\n".join(parts[:mid])
-                teil2 = "\n\n".join(parts[mid:])
-                sende_telegram(chat_id, teil1)
-                time.sleep(1)
-                sende_telegram(chat_id, teil2)
-            else:
-                sende_telegram(chat_id, nachricht)
+            sende_telegram(chat_id, gesamte_nachricht)
+            bereits_belieferte_chats.add(chat_id)
+            print(f"Erfolgreich an {kanal['titel']} gesendet.")
             time.sleep(2)
         except Exception as e:
             print(f"Fehler beim Senden an {kanal['titel']}: {e}")
 
-# 3. Neue IDs persistieren
 if gesamt_neue_ids:
     speichere_neue_ids(gesehene_ids, gesamt_neue_ids)
 
-# 4. Web-App wachhalten
 try:
     requests.get(APP_URL, timeout=10)
 except Exception:
