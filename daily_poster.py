@@ -103,3 +103,9 @@ if bereinigte_treffer and BOT_TOKEN and CHAT_ID:
 
     sende_telegram("\n\n".join(parts))
     speichere_neue_ids(gesehene_ids, versendete_ids)
+
+# Streamlit-App aufwecken / wachhalten
+try:
+    requests.get(APP_URL, timeout=10)
+except Exception:
+    pass
