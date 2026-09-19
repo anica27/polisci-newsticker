@@ -28,7 +28,6 @@ def sende_telegram_nachricht(nachricht_text):
     try:
         res = requests.post(url, json=payload, timeout=8)
         if not res.ok:
-            # Zeigt die genaue Ursache von Telegram an (z. B. "chat not found", "not enough rights")
             try:
                 antwort = res.json()
                 grund = antwort.get("description", res.text)
@@ -95,7 +94,7 @@ SACHGEBIETE = {
     "Alle Sachgebiete": None,
     "Internationale Beziehungen & Außenpolitik": "topics/T10053",
     "Vergleichende Regierungslehre & Wahlsysteme": "topics/T10108",
-    "Politische Theorie & Ideengeschichte": "topics/T11532",
+    "Politische Theorie & Ideengeschichte": "topics/T11456",
     "Verwaltungswissenschaft & Public Policy": "topics/T10289",
     "Europäische Union & Regionalintegration": "topics/T10294",
 }
@@ -115,6 +114,7 @@ start_datum = (datetime.date.today() - datetime.timedelta(days=tage_zurueck)).st
 
 # Filter-Parameter für OpenAlex
 filter_regeln = [
+    "type:article",
     "primary_location.source.type:journal",
     "language:de|en",
     "is_paratext:false",
@@ -129,7 +129,8 @@ spezifische_topic_id = SACHGEBIETE[gewaehltes_gebiet]
 if spezifische_topic_id:
     filter_regeln.append(f"primary_topic.id:{spezifische_topic_id}")
 else:
-    filter_regeln.append("primary_topic.subfield.id:subfields/3320")
+    # 3312 = Sociology and Political Science (korrigiert von 3320)
+    filter_regeln.append("primary_topic.subfield.id:subfields/3312")
 
 if nur_oa:
     filter_regeln.append("is_oa:true")
@@ -210,7 +211,6 @@ for idx, eintrag in enumerate(treffer):
         st.markdown(f"**Autor:innen:** {autoren}")
         st.markdown(f"**Erschienen am:** `{datum}` in *{journal}*")
         
-        # Aktions-Buttons nebeneinander
         col_link, col_telegram = st.columns([1, 1])
         with col_link:
             if link:
@@ -220,7 +220,6 @@ for idx, eintrag in enumerate(treffer):
         
         with col_telegram:
             if st.button("📲 Paper an Telegram senden", key=f"tg_{idx}"):
-                # Sonderzeichen maskieren, damit Telegram-HTML nicht bricht
                 titel_safe = html.escape(titel)
                 autoren_safe = html.escape(autoren)
                 journal_safe = html.escape(journal)
@@ -237,7 +236,6 @@ for idx, eintrag in enumerate(treffer):
                 if sende_telegram_nachricht(text_block):
                     st.success("Erfolgreich gesendet!")
 
-        # Zusammenfassung zum Aufklappen
         if abstract_text:
             with st.expander("📖 Zusammenfassung lesen"):
                 st.markdown("**Originaltext:**")
