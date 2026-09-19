@@ -8,34 +8,31 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 APP_URL = "https://polisci-ticker.streamlit.app"
 SEEN_FILE = "seen_ids.txt"
 
-# Reine OpenAlex Topic-IDs (ohne 'topics/' Präfix für den API-Filter)
+# Die 4 Fachkanäle – verankert in Politik- & Sozialwissenschaften
 KANAELE = [
     {
         "titel": "Internationale Beziehungen & Außenpolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
-        # T10053: IR & Foreign Policy, T11168: Peace, Conflict & Security
-        "topics": ["T10053", "T11168"],
+        "topics": "T10053|T11168",
         "ziel_anzahl": 10
     },
     {
         "titel": "Vergleichende Regierungslehre & Wahlsysteme",
         "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
-        # T10108: Voting & Elections, T11397: Comparative Politics, T11742: Party Politics
-        "topics": ["T10108", "T11397", "T11742"],
+        "topics": "T10108|T11397|T11742",
         "ziel_anzahl": 10
     },
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # T11456: Democratic Theory, T12752: History of Political Thought
-        "topics": ["T11456", "T12752"],
+        # Dynamische Suche nach echten Theorie-Topics innerhalb der Sozialwissenschaften
+        "theorie_modus": True,
         "ziel_anzahl": 10
     },
     {
         "titel": "Public Policy & Verwaltungswissenschaft",
         "chat_id": os.environ.get("CHAT_ID_POLICY"),
-        # T10289: Public Admin & Policy, T12397: Governance & Regulation
-        "topics": ["T10289", "T12397"],
+        "topics": "T10289|T12397",
         "ziel_anzahl": 10
     }
 ]
@@ -45,11 +42,13 @@ UNERWUENSCHTE_TITEL = {
     "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
+# Zweifache Absicherung: Biomedizinische Signalwörter aussortieren
 AUSSCHLUSS_BEGRIFFE = [
-    "epistemology", "epistemic", "ontology", "ontological", "metaphysics",
-    "phenomenology", "kant's mathematical", "logic as elaboration",
-    "truth conditional", "nurse", "nursing", "midwife", "midwifery", "prenatal",
-    "clinical", "patient", "therapy", "cancer", "biomedical", "molecular"
+    "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
+    "striatum", "motor nucleus", "vagus", "pyroptotic", "sids",
+    "respiratory", "pulmonary", "neuromuscular", "hypoglossal",
+    "nurse", "nursing", "midwife", "prenatal", "clinical", "patient",
+    "therapy", "cancer", "biomedical", "molecular", "cell"
 ]
 
 def lade_gesehene_ids():
@@ -86,6 +85,26 @@ def ermittle_country_code(paper):
                 return cc.upper()
     return "UNKNOWN"
 
+@st_cache_like_helper = {}
+def ermittle_theorie_topic_ids():
+    """Holt die verifizierten Topic-IDs für Politische Theorie direkt von OpenAlex ab."""
+    url = "https://api.openalex.org/topics"
+    params = {
+        "search": "political theory political philosophy history of political thought",
+        "filter": "domain.id:2",  # Nur Sozialwissenschaften
+        "per_page": 5
+    }
+    try:
+        res = requests.get(url, params=params, timeout=10)
+        results = res.json().get("results", [])
+        ids = [t["id"].split("/")[-1] for t in results if "id" in t]
+        if ids:
+            return "|".join(ids)
+    except Exception as e:
+        print(f"Fehler bei dynamischer Topic-Ermittlung: {e}")
+    # Solider Fallback: Subfield Sociology and Political Science
+    return None
+
 gesehene_ids = lade_gesehene_ids()
 gesamt_neue_ids = []
 
@@ -98,29 +117,36 @@ bereits_belieferte_chats = set()
 for kanal in KANAELE:
     chat_id = kanal.get("chat_id")
     if not chat_id or not BOT_TOKEN:
-        print(f"Übersprungen: Kein Secret für '{kanal['titel']}'.")
         continue
 
     chat_id = str(chat_id).strip()
     if chat_id in bereits_belieferte_chats:
         continue
 
-    # Sauber formatierte Topic-Filter (T10053|T11168)
-    topic_ids_pipe = "|".join(kanal["topics"])
-    filter_string = (
+    # Filter zusammenbauen
+    basis_filter = (
         f"type:article,"
         f"primary_location.source.type:journal,"
         f"is_paratext:false,"
         f"has_abstract:true,"
         f"language:de|en,"
         f"from_publication_date:{start},"
-        f"primary_topic.id:{topic_ids_pipe}"
+        f"primary_topic.domain.id:2"  # ZWINGEND: Nur Social Sciences (keine Medizin/Biologie)
     )
+
+    if kanal.get("theorie_modus"):
+        theorie_topics = ermittle_theorie_topic_ids()
+        if theorie_topics:
+            filter_string = f"{basis_filter},primary_topic.id:{theorie_topics}"
+        else:
+            filter_string = f"{basis_filter},primary_topic.subfield.id:3312"
+    else:
+        filter_string = f"{basis_filter},primary_topic.id:{kanal['topics']}"
 
     params = {
         "filter": filter_string,
         "sort": "publication_date:desc",
-        "per_page": 100
+        "per_page": 80
     }
 
     try:
@@ -128,7 +154,7 @@ for kanal in KANAELE:
         res.raise_for_status()
         roh_treffer = res.json().get("results", [])
     except Exception as e:
-        print(f"Fehler bei OpenAlex-Abfrage für {kanal['titel']}: {e}")
+        print(f"Fehler bei Abruf für {kanal['titel']}: {e}")
         continue
 
     bereinigte_treffer = []
@@ -146,6 +172,7 @@ for kanal in KANAELE:
             continue
         if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
             continue
+        # Biologische/medizinische Restbegriffe aussortieren
         if any(term in titel_lower for term in AUSSCHLUSS_BEGRIFFE):
             continue
         if p_id in gesehene_ids or p_id in gesamt_neue_ids:
@@ -169,7 +196,7 @@ for kanal in KANAELE:
         if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
             break
 
-    # Falls durch die Regions-Bremse noch keine 10 voll sind: direkt aus den Themen-Treffern auffüllen
+    # Falls noch nicht 10 voll sind: Auffüllen aus verifizierten Sozialwissenschaften-Treffern
     if len(bereinigte_treffer) < kanal["ziel_anzahl"]:
         for p in roh_treffer:
             p_id = p.get("id")
