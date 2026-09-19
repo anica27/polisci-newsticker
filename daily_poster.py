@@ -8,34 +8,34 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 APP_URL = "https://polisci-ticker.streamlit.app"
 SEEN_FILE = "seen_ids.txt"
 
-# Exakte, verifizierte PoliSci-Topic-Cluster pro Fachbereich
+# Reine OpenAlex Topic-IDs (ohne 'topics/' Präfix für den API-Filter)
 KANAELE = [
     {
         "titel": "Internationale Beziehungen & Außenpolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
-        # T10053 = International Relations & Foreign Policy, T11168 = Peace, Conflict & Security
-        "topics": ["topics/T10053", "topics/T11168"],
+        # T10053: IR & Foreign Policy, T11168: Peace, Conflict & Security
+        "topics": ["T10053", "T11168"],
         "ziel_anzahl": 10
     },
     {
         "titel": "Vergleichende Regierungslehre & Wahlsysteme",
         "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
-        # T10108 = Electoral Systems & Voting, T11397 = Comparative Politics & Regimes, T11742 = Party Politics
-        "topics": ["topics/T10108", "topics/T11397", "topics/T11742"],
+        # T10108: Voting & Elections, T11397: Comparative Politics, T11742: Party Politics
+        "topics": ["T10108", "T11397", "T11742"],
         "ziel_anzahl": 10
     },
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # T11456 = Democratic Theory & Deliberation, T12752 = History of Political Thought
-        "topics": ["topics/T11456", "topics/T12752"],
+        # T11456: Democratic Theory, T12752: History of Political Thought
+        "topics": ["T11456", "T12752"],
         "ziel_anzahl": 10
     },
     {
         "titel": "Public Policy & Verwaltungswissenschaft",
         "chat_id": os.environ.get("CHAT_ID_POLICY"),
-        # T10289 = Public Administration & Policy, T12397 = Governance & Regulation
-        "topics": ["topics/T10289", "topics/T12397"],
+        # T10289: Public Admin & Policy, T12397: Governance & Regulation
+        "topics": ["T10289", "T12397"],
         "ziel_anzahl": 10
     }
 ]
@@ -45,11 +45,10 @@ UNERWUENSCHTE_TITEL = {
     "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
-# Schutzfilter gegen Philosophie-, Logik- und Naturwissenschafts-Reste
 AUSSCHLUSS_BEGRIFFE = [
     "epistemology", "epistemic", "ontology", "ontological", "metaphysics",
     "phenomenology", "kant's mathematical", "logic as elaboration",
-    "truth conditional", "nurse", "nursing", "midwife", "prenatal",
+    "truth conditional", "nurse", "nursing", "midwife", "midwifery", "prenatal",
     "clinical", "patient", "therapy", "cancer", "biomedical", "molecular"
 ]
 
@@ -99,13 +98,15 @@ bereits_belieferte_chats = set()
 for kanal in KANAELE:
     chat_id = kanal.get("chat_id")
     if not chat_id or not BOT_TOKEN:
+        print(f"Übersprungen: Kein Secret für '{kanal['titel']}'.")
         continue
 
     chat_id = str(chat_id).strip()
     if chat_id in bereits_belieferte_chats:
         continue
 
-    topics_filter_val = "|".join(kanal["topics"])
+    # Sauber formatierte Topic-Filter (T10053|T11168)
+    topic_ids_pipe = "|".join(kanal["topics"])
     filter_string = (
         f"type:article,"
         f"primary_location.source.type:journal,"
@@ -113,7 +114,7 @@ for kanal in KANAELE:
         f"has_abstract:true,"
         f"language:de|en,"
         f"from_publication_date:{start},"
-        f"primary_topic.id:{topics_filter_val}"
+        f"primary_topic.id:{topic_ids_pipe}"
     )
 
     params = {
@@ -124,35 +125,30 @@ for kanal in KANAELE:
 
     try:
         res = requests.get("https://api.openalex.org/works", params=params, timeout=15)
+        res.raise_for_status()
         roh_treffer = res.json().get("results", [])
     except Exception as e:
-        print(f"Fehler beim Abruf für {kanal['titel']}: {e}")
+        print(f"Fehler bei OpenAlex-Abfrage für {kanal['titel']}: {e}")
         continue
 
     bereinigte_treffer = []
     journal_counter = {}
     region_counter = {}
 
-    # Durchlauf mit strenger Regions- und Journal-Bremse
     for p in roh_treffer:
         p_id = p.get("id")
         titel_raw = (p.get("title") or "").strip()
         titel_lower = titel_raw.lower().rstrip(".")
         journal_id = (p.get("primary_location") or {}).get("source", {}).get("id")
-        primary_topic_id = (p.get("primary_topic") or {}).get("id", "")
         country = ermittle_country_code(p)
 
         if not p_id or not titel_raw:
             continue
-        # Fachfremde und Fragmente blockieren
         if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
             continue
         if any(term in titel_lower for term in AUSSCHLUSS_BEGRIFFE):
             continue
         if p_id in gesehene_ids or p_id in gesamt_neue_ids:
-            continue
-        # Sicherstellen, dass das Paper wirklich dem Fachbereich zugeordnet ist
-        if primary_topic_id not in kanal["topics"]:
             continue
 
         if journal_id:
@@ -173,21 +169,18 @@ for kanal in KANAELE:
         if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
             break
 
-    # Falls durch die Regions-Bremse noch keine 10 voll sind: Auffüllen NUR aus den fachlichen Roh-Treffern
+    # Falls durch die Regions-Bremse noch keine 10 voll sind: direkt aus den Themen-Treffern auffüllen
     if len(bereinigte_treffer) < kanal["ziel_anzahl"]:
         for p in roh_treffer:
             p_id = p.get("id")
             titel_raw = (p.get("title") or "").strip()
             titel_lower = titel_raw.lower().rstrip(".")
-            primary_topic_id = (p.get("primary_topic") or {}).get("id", "")
 
             if not p_id or not titel_raw or p_id in gesehene_ids or p_id in gesamt_neue_ids:
                 continue
             if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
                 continue
             if any(term in titel_lower for term in AUSSCHLUSS_BEGRIFFE):
-                continue
-            if primary_topic_id not in kanal["topics"]:
                 continue
 
             bereinigte_treffer.append(p)
@@ -221,6 +214,8 @@ for kanal in KANAELE:
             time.sleep(2)
         except Exception as e:
             print(f"Fehler beim Senden an {kanal['titel']}: {e}")
+    else:
+        print(f"Keine Treffer für '{kanal['titel']}' ermittelt.")
 
 if gesamt_neue_ids:
     speichere_neue_ids(gesehene_ids, gesamt_neue_ids)
