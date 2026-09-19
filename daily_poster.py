@@ -8,34 +8,34 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 APP_URL = "https://polisci-ticker.streamlit.app"
 SEEN_FILE = "seen_ids.txt"
 
-# Präzise Topic-Cluster pro Fachbereich (garantiert >10 Treffer ohne 0-Ergebnis-Abbrüche)
+# Exakte, verifizierte PoliSci-Topic-Cluster pro Fachbereich
 KANAELE = [
     {
         "titel": "Internationale Beziehungen & Außenpolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
-        # T10053 (IR & Foreign Policy), T11168 (Peace & Conflict), T10258 (Security/Geopolitics)
-        "topics": "topics/T10053|topics/T11168|topics/T10258",
+        # T10053 = International Relations & Foreign Policy, T11168 = Peace, Conflict & Security
+        "topics": ["topics/T10053", "topics/T11168"],
         "ziel_anzahl": 10
     },
     {
         "titel": "Vergleichende Regierungslehre & Wahlsysteme",
         "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
-        # T10108 (Voting & Electoral Systems), T11397 (Comparative Politics & Regimes), T11742 (Party Politics)
-        "topics": "topics/T10108|topics/T11397|topics/T11742",
+        # T10108 = Electoral Systems & Voting, T11397 = Comparative Politics & Regimes, T11742 = Party Politics
+        "topics": ["topics/T10108", "topics/T11397", "topics/T11742"],
         "ziel_anzahl": 10
     },
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # T11456 (Democratic Theory & Deliberation), T12752 (History of Political Thought), T13445 (Normative Political Philosophy)
-        "topics": "topics/T11456|topics/T12752|topics/T13445",
+        # T11456 = Democratic Theory & Deliberation, T12752 = History of Political Thought
+        "topics": ["topics/T11456", "topics/T12752"],
         "ziel_anzahl": 10
     },
     {
         "titel": "Public Policy & Verwaltungswissenschaft",
         "chat_id": os.environ.get("CHAT_ID_POLICY"),
-        # T10289 (Public Admin & Policy Analysis), T12397 (Governance & Regulation), T13170 (Bureaucracy)
-        "topics": "topics/T10289|topics/T12397|topics/T13170",
+        # T10289 = Public Administration & Policy, T12397 = Governance & Regulation
+        "topics": ["topics/T10289", "topics/T12397"],
         "ziel_anzahl": 10
     }
 ]
@@ -45,11 +45,12 @@ UNERWUENSCHTE_TITEL = {
     "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
-# Schutzfilter gegen naturwissenschaftlich-klinische Restbestände
+# Schutzfilter gegen Philosophie-, Logik- und Naturwissenschafts-Reste
 AUSSCHLUSS_BEGRIFFE = [
-    "nurse", "nursing", "midwife", "midwifery", "prenatal",
-    "clinical", "patient", "therapy", "hospital", "cancer",
-    "biomedical", "molecular", "cell", "syndrome"
+    "epistemology", "epistemic", "ontology", "ontological", "metaphysics",
+    "phenomenology", "kant's mathematical", "logic as elaboration",
+    "truth conditional", "nurse", "nursing", "midwife", "prenatal",
+    "clinical", "patient", "therapy", "cancer", "biomedical", "molecular"
 ]
 
 def lade_gesehene_ids():
@@ -78,11 +79,9 @@ def sende_telegram(chat_id, text):
     res.raise_for_status()
 
 def ermittle_country_code(paper):
-    """Extrahiert den Ländercode der Erstinstitution zur regionalen Steuerung."""
     authorships = paper.get("authorships", [])
     for aut in authorships:
-        institutions = aut.get("institutions", [])
-        for inst in institutions:
+        for inst in aut.get("institutions", []):
             cc = inst.get("country_code")
             if cc:
                 return cc.upper()
@@ -93,25 +92,20 @@ gesamt_neue_ids = []
 
 heute = datetime.date.today()
 datum_str = heute.strftime("%d.%m.%Y")
-# 14 Tage Zeitfenster stellt sicher, dass in allen 4 Kanälen stets 10 Arbeiten bereitstehen
-start = (heute - datetime.timedelta(days=14)).strftime("%Y-%m-%d")
+start = (heute - datetime.timedelta(days=21)).strftime("%Y-%m-%d")
 
 bereits_belieferte_chats = set()
 
 for kanal in KANAELE:
     chat_id = kanal.get("chat_id")
-    
     if not chat_id or not BOT_TOKEN:
-        print(f"Übersprungen: Kein Chat-ID-Secret für '{kanal['titel']}'.")
         continue
 
     chat_id = str(chat_id).strip()
-
     if chat_id in bereits_belieferte_chats:
-        print(f"Chat-ID {chat_id} bereits bedient. Überspringe {kanal['titel']}.")
         continue
 
-    # Filterung ausschließlich über die thematischen PoliSci-Topics
+    topics_filter_val = "|".join(kanal["topics"])
     filter_string = (
         f"type:article,"
         f"primary_location.source.type:journal,"
@@ -119,13 +113,13 @@ for kanal in KANAELE:
         f"has_abstract:true,"
         f"language:de|en,"
         f"from_publication_date:{start},"
-        f"primary_topic.id:{kanal['topics']}"
+        f"primary_topic.id:{topics_filter_val}"
     )
 
     params = {
         "filter": filter_string,
         "sort": "publication_date:desc",
-        "per_page": 80
+        "per_page": 100
     }
 
     try:
@@ -139,28 +133,31 @@ for kanal in KANAELE:
     journal_counter = {}
     region_counter = {}
 
+    # Durchlauf mit strenger Regions- und Journal-Bremse
     for p in roh_treffer:
         p_id = p.get("id")
         titel_raw = (p.get("title") or "").strip()
         titel_lower = titel_raw.lower().rstrip(".")
         journal_id = (p.get("primary_location") or {}).get("source", {}).get("id")
+        primary_topic_id = (p.get("primary_topic") or {}).get("id", "")
         country = ermittle_country_code(p)
 
         if not p_id or not titel_raw:
             continue
+        # Fachfremde und Fragmente blockieren
         if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
             continue
         if any(term in titel_lower for term in AUSSCHLUSS_BEGRIFFE):
             continue
         if p_id in gesehene_ids or p_id in gesamt_neue_ids:
             continue
+        # Sicherstellen, dass das Paper wirklich dem Fachbereich zugeordnet ist
+        if primary_topic_id not in kanal["topics"]:
+            continue
 
-        # 1. Journal-Diversität: max. 2 Artikel pro Journal
         if journal_id:
             if journal_counter.get(journal_id, 0) >= 2:
                 continue
-
-        # 2. Regionale Bias-Bremse: max. 2 Arbeiten pro Länder-Cluster (außer UNKNOWN)
         if country != "UNKNOWN":
             if region_counter.get(country, 0) >= 2:
                 continue
@@ -176,18 +173,21 @@ for kanal in KANAELE:
         if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
             break
 
-    # Falls durch strenge Region-Limits weniger als 10 gefunden wurden: restliche auffüllen
+    # Falls durch die Regions-Bremse noch keine 10 voll sind: Auffüllen NUR aus den fachlichen Roh-Treffern
     if len(bereinigte_treffer) < kanal["ziel_anzahl"]:
         for p in roh_treffer:
             p_id = p.get("id")
             titel_raw = (p.get("title") or "").strip()
             titel_lower = titel_raw.lower().rstrip(".")
-            
+            primary_topic_id = (p.get("primary_topic") or {}).get("id", "")
+
             if not p_id or not titel_raw or p_id in gesehene_ids or p_id in gesamt_neue_ids:
                 continue
             if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
                 continue
             if any(term in titel_lower for term in AUSSCHLUSS_BEGRIFFE):
+                continue
+            if primary_topic_id not in kanal["topics"]:
                 continue
 
             bereinigte_treffer.append(p)
@@ -214,17 +214,13 @@ for kanal in KANAELE:
 
         parts.append(f"\n🔍 <i>Abstracts, Filter & Übersetzungen in der Web-App:</i>\n👉 <a href='{APP_URL}'>PoliSci Newsticker öffnen</a>")
 
-        gesamte_nachricht = "\n\n".join(parts)
-        
         try:
-            sende_telegram(chat_id, gesamte_nachricht)
+            sende_telegram(chat_id, "\n\n".join(parts))
             bereits_belieferte_chats.add(chat_id)
-            print(f"Erfolgreich 10 Papers an '{kanal['titel']}' gesendet.")
+            print(f"Erfolgreich {len(bereinigte_treffer)} Papers an '{kanal['titel']}' gesendet.")
             time.sleep(2)
         except Exception as e:
             print(f"Fehler beim Senden an {kanal['titel']}: {e}")
-    else:
-        print(f"Warnung: Keine Treffer für '{kanal['titel']}' gefunden.")
 
 if gesamt_neue_ids:
     speichere_neue_ids(gesehene_ids, gesamt_neue_ids)
