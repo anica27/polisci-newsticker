@@ -1,50 +1,15 @@
 import datetime
-import html
 import streamlit as st
 import requests
 from translate import Translator
 
 st.set_page_config(page_title="PoliSci Newsticker", page_icon="📚", layout="centered")
 
-# --- TELEGRAM-VERSANDFUNKTION MIT DETAIL-DIAGNOSE ---
-
-def sende_telegram_nachricht(nachricht_text):
-    """Sendet eine formatierte Nachricht via Telegram Bot API mit detaillierter Fehleranzeige."""
-    try:
-        bot_token = st.secrets["TELEGRAM_BOT_TOKEN"]
-        chat_id = st.secrets["TELEGRAM_CHAT_ID"]
-    except KeyError as e:
-        st.error(f"Fehlendes Secret in Streamlit Settings: {e}")
-        return False
-
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": nachricht_text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": False
-    }
-
-    try:
-        res = requests.post(url, json=payload, timeout=8)
-        if not res.ok:
-            try:
-                antwort = res.json()
-                grund = antwort.get("description", res.text)
-            except Exception:
-                grund = res.text
-            st.error(f"Telegram-Fehler ({res.status_code}): {grund}")
-            return False
-        return True
-    except Exception as e:
-        st.error(f"Verbindungsfehler zu Telegram: {e}")
-        return False
-
 # --- HILFSFUNKTIONEN (CACHING & TEXTVERARBEITUNG) ---
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def lade_daten_von_api(url, params):
-    """Holt Daten von OpenAlex und speichert das Ergebnis für 1 Stunde im Cache."""
+    """Holt Daten von OpenAlex und cacht das Ergebnis für 1 Stunde."""
     res = requests.get(url, params=params, timeout=12)
     res.raise_for_status()
     return res.json().get("results", [])
@@ -88,22 +53,22 @@ def uebersetze_ins_deutsche(text):
 st.title("📚 PoliSci Newsticker")
 st.caption("Aktuelle internationale politikwissenschaftliche Veröffentlichungen.")
 
-# --- SEITENLEISTE (FILTER) ---
+# --- SEITENLEISTE (HARMONISIERTE SACHGEBIETE) ---
 
+# Exakt synchron zu den geprüften Topics aus daily_poster.py
 SACHGEBIETE = {
-    "Alle Sachgebiete": None,
-    "Internationale Beziehungen & Außenpolitik": "topics/T10053",
-    "Vergleichende Regierungslehre & Wahlsysteme": "topics/T10108",
-    "Politische Theorie & Ideengeschichte": "topics/T11456",
-    "Verwaltungswissenschaft & Public Policy": "topics/T10289",
-    "Europäische Union & Regionalintegration": "topics/T10294",
+    "Alle Teilbereiche (Politikwissenschaft)": None,
+    "Internationale Beziehungen & Außenpolitik": "T10053|T11168",
+    "Vergleichende Regierungslehre & Wahlsysteme": "T10108|T11397|T11742",
+    "Politische Theorie & Ideengeschichte": "T10718|T13138|T11997",
+    "Public Policy & Verwaltungswissenschaft": "T10289",
 }
 
 st.sidebar.header("🔍 Filteroptionen")
-suchbegriff = st.sidebar.text_input("Schlagwortsuche:", placeholder="z. B. Wahlsystem, Populismus...")
+suchbegriff = st.sidebar.text_input("Schlagwortsuche:", placeholder="z. B. Populismus, Koalition, Sanctions...")
 gewaehltes_gebiet = st.sidebar.selectbox("Sachgebiet eingrenzen:", list(SACHGEBIETE.keys()))
 tage_zurueck = st.sidebar.slider("Zeitraum (letzte X Tage):", min_value=7, max_value=60, value=30)
-anzahl = st.sidebar.slider("Anzahl der Einträge:", min_value=5, max_value=25, value=10)
+anzahl = st.sidebar.slider("Anzahl der Einträge:", min_value=5, max_value=30, value=10)
 
 nur_oa = st.sidebar.checkbox("Nur Open Access (frei lesbar)")
 nur_mit_abstract = st.sidebar.checkbox("Nur Papers mit Zusammenfassung anzeigen", value=True)
@@ -112,12 +77,13 @@ nur_mit_abstract = st.sidebar.checkbox("Nur Papers mit Zusammenfassung anzeigen"
 heute = datetime.date.today().strftime("%Y-%m-%d")
 start_datum = (datetime.date.today() - datetime.timedelta(days=tage_zurueck)).strftime("%Y-%m-%d")
 
-# Filter-Parameter für OpenAlex
+# Strikte disziplinäre Filterregeln
 filter_regeln = [
     "type:article",
     "primary_location.source.type:journal",
     "language:de|en",
     "is_paratext:false",
+    "primary_topic.domain.id:2",  # Schließt Naturwissenschaften und Medizin aus
     f"from_publication_date:{start_datum}",
     f"to_publication_date:{heute}",
 ]
@@ -125,12 +91,12 @@ filter_regeln = [
 if nur_mit_abstract:
     filter_regeln.append("has_abstract:true")
 
-spezifische_topic_id = SACHGEBIETE[gewaehltes_gebiet]
-if spezifische_topic_id:
-    filter_regeln.append(f"primary_topic.id:{spezifische_topic_id}")
+spezifische_topics = SACHGEBIETE[gewaehltes_gebiet]
+if spezifische_topics:
+    filter_regeln.append(f"primary_topic.id:{spezifische_topics}")
 else:
-    # 3312 = Sociology and Political Science (korrigiert von 3320)
-    filter_regeln.append("primary_topic.subfield.id:subfields/3312")
+    # Übergeordnetes Fachgebiet für Soziologie & Politikwissenschaft
+    filter_regeln.append("primary_topic.subfield.id:3312")
 
 if nur_oa:
     filter_regeln.append("is_oa:true")
@@ -148,7 +114,7 @@ if suchbegriff.strip():
         trans = tr_suche.translate(orig)
         if trans and "error" not in trans.lower() and trans.lower() != orig.lower():
             query_params["search"] = f'"{orig}" OR "{trans}"'
-            st.info(f"🔎 Suche kombiniert: **{orig}** + **{trans}**")
+            st.info(f"🔎 Suche kombiniert (DE + EN): **{orig}** | **{trans}**")
         else:
             query_params["search"] = f'"{orig}"'
     except Exception:
@@ -165,27 +131,8 @@ with st.spinner("Lade Publikationen..."):
 
 st.markdown(f"**Gefundene Veröffentlichungen:** {len(treffer)}")
 
-# --- TELEGRAM-SAMMELVERSAND IN DER SIDEBAR ---
-if treffer:
-    st.sidebar.divider()
-    st.sidebar.subheader("📲 Telegram Push")
-    if st.sidebar.button("Top 5 Treffer an Telegram senden"):
-        gebiet_safe = html.escape(gewaehltes_gebiet)
-        nachrichten_teile = [f"<b>📚 PoliSci Newsticker: Top-Funde</b>\n<i>Filter: {gebiet_safe}</i>\n"]
-        for p in treffer[:5]:
-            p_titel = html.escape(p.get("title") or "Kein Titel")
-            p_link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
-            if p_link:
-                nachrichten_teile.append(f"• <b>{p_titel}</b>\n  🔗 <a href='{p_link}'>Zum Artikel</a>")
-            else:
-                nachrichten_teile.append(f"• <b>{p_titel}</b>")
-        
-        gesamt_text = "\n\n".join(nachrichten_teile)
-        if sende_telegram_nachricht(gesamt_text):
-            st.sidebar.success("Nachricht erfolgreich an Telegram gesendet!")
-
 if not treffer:
-    st.warning("Keine Treffer im gewählten Zeitraum. Probiere einen größeren Zeitraum oder ein anderes Schlagwort.")
+    st.warning("Keine Treffer im gewählten Zeitraum. Erweitere das Zeitfenster oder passe den Suchbegriff an.")
 
 # --- FEED ANZEIGEN ---
 
@@ -211,30 +158,11 @@ for idx, eintrag in enumerate(treffer):
         st.markdown(f"**Autor:innen:** {autoren}")
         st.markdown(f"**Erschienen am:** `{datum}` in *{journal}*")
         
-        col_link, col_telegram = st.columns([1, 1])
-        with col_link:
-            if link:
-                st.link_button("Zum Volltext / Verlag ↗", link)
-            else:
-                st.caption("Kein Direktlink vorhanden.")
-        
-        with col_telegram:
-            if st.button("📲 Paper an Telegram senden", key=f"tg_{idx}"):
-                titel_safe = html.escape(titel)
-                autoren_safe = html.escape(autoren)
-                journal_safe = html.escape(journal)
-                
-                text_block = (
-                    f"<b>📚 PoliSci Neuzugang</b>\n\n"
-                    f"<b>Titel:</b> {titel_safe}\n"
-                    f"<b>Autor:innen:</b> {autoren_safe}\n"
-                    f"<b>Journal:</b> {journal_safe} ({datum})\n"
-                )
-                if link:
-                    text_block += f"<b>Link:</b> <a href='{link}'>{link}</a>"
-                
-                if sende_telegram_nachricht(text_block):
-                    st.success("Erfolgreich gesendet!")
+        # Nur noch der Verlags-/Volltextlink (kein Telegram-Button mehr)
+        if link:
+            st.link_button("Zum Volltext / Verlag ↗", link)
+        else:
+            st.caption("Kein Direktlink vorhanden.")
 
         if abstract_text:
             with st.expander("📖 Zusammenfassung lesen"):
