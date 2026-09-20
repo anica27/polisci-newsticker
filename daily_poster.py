@@ -8,35 +8,13 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 APP_URL = "https://polisci-ticker.streamlit.app"
 SEEN_FILE = "seen_ids.txt"
 
-# Verifizierte, disziplinär geschlossene Topic-IDs für die 4 Teilbereiche
-KANAELE = [
-    {
-        "titel": "Internationale Beziehungen & Außenpolitik",
-        "chat_id": os.environ.get("CHAT_ID_IB"),
-        "topics": "T10053|T11168",
-        "ziel_anzahl": 10
-    },
-    {
-        "titel": "Vergleichende Regierungslehre & Wahlsysteme",
-        "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
-        "topics": "T10108|T11397|T11742",
-        "ziel_anzahl": 10
-    },
-    {
-        "titel": "Politische Theorie & Ideengeschichte",
-        "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # T10718: Democratic Theory & Constitutionalism
-        # T13138: History of Political Thought & Republicanism
-        # T11997: Critical Theory & Political Philosophy
-        "topics": "T10718|T13138|T11997",
-        "ziel_anzahl": 10
-    },
-    {
-        "titel": "Public Policy & Verwaltungswissenschaft",
-        "chat_id": os.environ.get("CHAT_ID_POLICY"),
-        "topics": "T10289|T12397",
-        "ziel_anzahl": 10
-    }
+# 1. Disziplinübergreifende Ausschlussbegriffe (in ALLEN Kanälen unerwünscht: Medizin & Naturwissenschaften)
+GLOBAL_AUSSCHLUSS = [
+    "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
+    "striatum", "motor nucleus", "vagus", "pyroptotic", "sids",
+    "respiratory", "pulmonary", "neuromuscular", "hypoglossal",
+    "nurse", "nursing", "midwife", "midwifery", "prenatal", "clinical",
+    "patient", "therapy", "cancer", "biomedical", "molecular", "cell"
 ]
 
 UNERWUENSCHTE_TITEL = {
@@ -44,13 +22,48 @@ UNERWUENSCHTE_TITEL = {
     "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
-# Schutzfilter gegen naturwissenschaftliche Restbegriffe
-AUSSCHLUSS_BEGRIFFE = [
-    "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
-    "striatum", "motor nucleus", "vagus", "pyroptotic", "sids",
-    "respiratory", "pulmonary", "neuromuscular", "hypoglossal",
-    "nurse", "nursing", "midwife", "midwifery", "prenatal", "clinical",
-    "patient", "therapy", "cancer", "biomedical", "molecular", "cell"
+# 2. Fachkanäle mit individuellen Topic-IDs und kanalspezifischen Ausschlüssen
+KANAELE = [
+    {
+        "titel": "Internationale Beziehungen & Außenpolitik",
+        "chat_id": os.environ.get("CHAT_ID_IB"),
+        "topics": "T10053|T11168",
+        "ziel_anzahl": 10,
+        "exclude_terms": [
+            "formal logic", "epistemology", "epistemic", "ontology", 
+            "truth conditional", "metaphysics"
+        ]
+    },
+    {
+        "titel": "Vergleichende Regierungslehre & Wahlsysteme",
+        "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
+        "topics": "T10108|T11397|T11742",
+        "ziel_anzahl": 10,
+        "exclude_terms": [
+            "epistemology", "metaphysics"
+        ]
+    },
+    {
+        "titel": "Politische Theorie & Ideengeschichte",
+        "chat_id": os.environ.get("CHAT_ID_THEORIE"),
+        "topics": "T10718|T13138|T11997",
+        "ziel_anzahl": 10,
+        # Hier sind Habermas, Adorno, Hegel, Kant ausdrücklich ERLAUBT!
+        "exclude_terms": [
+            "econometric", "firm performance", "stock return", "supply chain"
+        ]
+    },
+    {
+        "titel": "Public Policy & Verwaltungswissenschaft",
+        "chat_id": os.environ.get("CHAT_ID_POLICY"),
+        "topics": "T10289",
+        "ziel_anzahl": 10,
+        # Hält reine Philosophie- und Ideengeschichte-Texte aus der Verwaltungspraxis fern
+        "exclude_terms": [
+            "habermas", "adorno", "hegel", "kant's", "kantian", 
+            "ludwig von mises", "ideology critique", "metaphysics", "theology"
+        ]
+    }
 ]
 
 def lade_gesehene_ids():
@@ -92,7 +105,6 @@ gesamt_neue_ids = []
 
 heute = datetime.date.today()
 datum_str = heute.strftime("%d.%m.%Y")
-# 30 Tage Zeitfenster, um selbst in theorie-spezifischen Nischen 10 Aufsätze zu garantieren
 start = (heute - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 
 bereits_belieferte_chats = set()
@@ -106,6 +118,9 @@ for kanal in KANAELE:
     chat_id = str(chat_id).strip()
     if chat_id in bereits_belieferte_chats:
         continue
+
+    # Kombinierte Ausschlussliste speziell für diesen Kanal
+    kanal_ausschluss = GLOBAL_AUSSCHLUSS + kanal.get("exclude_terms", [])
 
     # Filter mit harter Domänen-Sperre (domain.id:2 = Social Sciences)
     filter_string = (
@@ -148,7 +163,8 @@ for kanal in KANAELE:
             continue
         if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
             continue
-        if any(term in titel_lower for term in AUSSCHLUSS_BEGRIFFE):
+        # Prüft sowohl globale als auch kanalspezifische Ausschlüsse
+        if any(term in titel_lower for term in kanal_ausschluss):
             continue
         if p_id in gesehene_ids or p_id in gesamt_neue_ids:
             continue
@@ -172,7 +188,7 @@ for kanal in KANAELE:
         if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
             break
 
-    # Falls durch die Regions-Bremse noch keine 10 voll sind: Auffüllen aus verifizierten Fach-Treffern
+    # Falls durch die Limits noch keine 10 voll sind: Auffüllen aus passenden Treffern
     if len(bereinigte_treffer) < kanal["ziel_anzahl"]:
         for p in roh_treffer:
             p_id = p.get("id")
@@ -183,7 +199,7 @@ for kanal in KANAELE:
                 continue
             if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
                 continue
-            if any(term in titel_lower for term in AUSSCHLUSS_BEGRIFFE):
+            if any(term in titel_lower for term in kanal_ausschluss):
                 continue
 
             bereinigte_treffer.append(p)
