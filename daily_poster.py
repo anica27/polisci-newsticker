@@ -8,7 +8,7 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 APP_URL = "https://polisci-ticker.streamlit.app"
 SEEN_FILE = "seen_ids.txt"
 
-# Die 4 Fachkanäle – verankert in Politik- & Sozialwissenschaften
+# Verifizierte, disziplinär geschlossene Topic-IDs für die 4 Teilbereiche
 KANAELE = [
     {
         "titel": "Internationale Beziehungen & Außenpolitik",
@@ -25,8 +25,10 @@ KANAELE = [
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # Dynamische Suche nach echten Theorie-Topics innerhalb der Sozialwissenschaften
-        "theorie_modus": True,
+        # T10718: Democratic Theory & Constitutionalism
+        # T13138: History of Political Thought & Republicanism
+        # T11997: Critical Theory & Political Philosophy
+        "topics": "T10718|T13138|T11997",
         "ziel_anzahl": 10
     },
     {
@@ -42,13 +44,13 @@ UNERWUENSCHTE_TITEL = {
     "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
-# Zweifache Absicherung: Biomedizinische Signalwörter aussortieren
+# Schutzfilter gegen naturwissenschaftliche Restbegriffe
 AUSSCHLUSS_BEGRIFFE = [
     "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
     "striatum", "motor nucleus", "vagus", "pyroptotic", "sids",
     "respiratory", "pulmonary", "neuromuscular", "hypoglossal",
-    "nurse", "nursing", "midwife", "prenatal", "clinical", "patient",
-    "therapy", "cancer", "biomedical", "molecular", "cell"
+    "nurse", "nursing", "midwife", "midwifery", "prenatal", "clinical",
+    "patient", "therapy", "cancer", "biomedical", "molecular", "cell"
 ]
 
 def lade_gesehene_ids():
@@ -85,68 +87,42 @@ def ermittle_country_code(paper):
                 return cc.upper()
     return "UNKNOWN"
 
-@st_cache_like_helper = {}
-def ermittle_theorie_topic_ids():
-    """Holt die verifizierten Topic-IDs für Politische Theorie direkt von OpenAlex ab."""
-    url = "https://api.openalex.org/topics"
-    params = {
-        "search": "political theory political philosophy history of political thought",
-        "filter": "domain.id:2",  # Nur Sozialwissenschaften
-        "per_page": 5
-    }
-    try:
-        res = requests.get(url, params=params, timeout=10)
-        results = res.json().get("results", [])
-        ids = [t["id"].split("/")[-1] for t in results if "id" in t]
-        if ids:
-            return "|".join(ids)
-    except Exception as e:
-        print(f"Fehler bei dynamischer Topic-Ermittlung: {e}")
-    # Solider Fallback: Subfield Sociology and Political Science
-    return None
-
 gesehene_ids = lade_gesehene_ids()
 gesamt_neue_ids = []
 
 heute = datetime.date.today()
 datum_str = heute.strftime("%d.%m.%Y")
-start = (heute - datetime.timedelta(days=21)).strftime("%Y-%m-%d")
+# 30 Tage Zeitfenster, um selbst in theorie-spezifischen Nischen 10 Aufsätze zu garantieren
+start = (heute - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 
 bereits_belieferte_chats = set()
 
 for kanal in KANAELE:
     chat_id = kanal.get("chat_id")
     if not chat_id or not BOT_TOKEN:
+        print(f"Übersprungen: Kein Secret für '{kanal['titel']}'.")
         continue
 
     chat_id = str(chat_id).strip()
     if chat_id in bereits_belieferte_chats:
         continue
 
-    # Filter zusammenbauen
-    basis_filter = (
+    # Filter mit harter Domänen-Sperre (domain.id:2 = Social Sciences)
+    filter_string = (
         f"type:article,"
         f"primary_location.source.type:journal,"
         f"is_paratext:false,"
         f"has_abstract:true,"
         f"language:de|en,"
         f"from_publication_date:{start},"
-        f"primary_topic.domain.id:2"  # ZWINGEND: Nur Social Sciences (keine Medizin/Biologie)
+        f"primary_topic.domain.id:2,"
+        f"primary_topic.id:{kanal['topics']}"
     )
-
-    if kanal.get("theorie_modus"):
-        theorie_topics = ermittle_theorie_topic_ids()
-        if theorie_topics:
-            filter_string = f"{basis_filter},primary_topic.id:{theorie_topics}"
-        else:
-            filter_string = f"{basis_filter},primary_topic.subfield.id:3312"
-    else:
-        filter_string = f"{basis_filter},primary_topic.id:{kanal['topics']}"
 
     params = {
         "filter": filter_string,
         "sort": "publication_date:desc",
-        "per_page": 80
+        "per_page": 100
     }
 
     try:
@@ -154,7 +130,7 @@ for kanal in KANAELE:
         res.raise_for_status()
         roh_treffer = res.json().get("results", [])
     except Exception as e:
-        print(f"Fehler bei Abruf für {kanal['titel']}: {e}")
+        print(f"Fehler bei OpenAlex-Abfrage für {kanal['titel']}: {e}")
         continue
 
     bereinigte_treffer = []
@@ -172,12 +148,12 @@ for kanal in KANAELE:
             continue
         if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
             continue
-        # Biologische/medizinische Restbegriffe aussortieren
         if any(term in titel_lower for term in AUSSCHLUSS_BEGRIFFE):
             continue
         if p_id in gesehene_ids or p_id in gesamt_neue_ids:
             continue
 
+        # Journal- und Regions-Bremse (max. 2 pro Journal, max. 2 pro Land)
         if journal_id:
             if journal_counter.get(journal_id, 0) >= 2:
                 continue
@@ -196,7 +172,7 @@ for kanal in KANAELE:
         if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
             break
 
-    # Falls noch nicht 10 voll sind: Auffüllen aus verifizierten Sozialwissenschaften-Treffern
+    # Falls durch die Regions-Bremse noch keine 10 voll sind: Auffüllen aus verifizierten Fach-Treffern
     if len(bereinigte_treffer) < kanal["ziel_anzahl"]:
         for p in roh_treffer:
             p_id = p.get("id")
