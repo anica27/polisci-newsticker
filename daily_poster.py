@@ -1,245 +1,255 @@
 import datetime
 import html
-import os
-import time
+import streamlit as st
 import requests
+from translate import Translator
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-APP_URL = "https://polisci-ticker.streamlit.app"
-SEEN_FILE = "seen_ids.txt"
+st.set_page_config(page_title="PoliSci Newsticker", page_icon="📚", layout="centered")
 
-# 1. Disziplinübergreifende Ausschlussbegriffe (in ALLEN Kanälen unerwünscht: Medizin & Naturwissenschaften)
-GLOBAL_AUSSCHLUSS = [
-    "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
-    "striatum", "motor nucleus", "vagus", "pyroptotic", "sids",
-    "respiratory", "pulmonary", "neuromuscular", "hypoglossal",
-    "nurse", "nursing", "midwife", "midwifery", "prenatal", "clinical",
-    "patient", "therapy", "cancer", "biomedical", "molecular", "cell"
-]
+# --- TELEGRAM-VERSANDFUNKTION MIT DETAIL-DIAGNOSE ---
 
-UNERWUENSCHTE_TITEL = {
-    "conclusion", "conclusions", "introduction", "preface", "index",
-    "contents", "editorial", "book reviews", "front matter", "back matter"
-}
+def sende_telegram_nachricht(nachricht_text):
+    """Sendet eine formatierte Nachricht via Telegram Bot API."""
+    try:
+        bot_token = st.secrets["TELEGRAM_BOT_TOKEN"]
+        chat_id = st.secrets["TELEGRAM_CHAT_ID"]
+    except KeyError as e:
+        st.error(f"Fehlendes Secret in Streamlit Settings: {e}")
+        return False
 
-# 2. Fachkanäle mit individuellen Topic-IDs und kanalspezifischen Ausschlüssen
-KANAELE = [
-    {
-        "titel": "Internationale Beziehungen & Außenpolitik",
-        "chat_id": os.environ.get("CHAT_ID_IB"),
-        "topics": "T10053|T11168",
-        "ziel_anzahl": 10,
-        "exclude_terms": [
-            "formal logic", "epistemology", "epistemic", "ontology", 
-            "truth conditional", "metaphysics"
-        ]
-    },
-    {
-        "titel": "Vergleichende Regierungslehre & Wahlsysteme",
-        "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
-        "topics": "T10108|T11397|T11742",
-        "ziel_anzahl": 10,
-        "exclude_terms": [
-            "epistemology", "metaphysics"
-        ]
-    },
-    {
-        "titel": "Politische Theorie & Ideengeschichte",
-        "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        "topics": "T10718|T13138|T11997",
-        "ziel_anzahl": 10,
-        # Hier sind Habermas, Adorno, Hegel, Kant ausdrücklich ERLAUBT!
-        "exclude_terms": [
-            "econometric", "firm performance", "stock return", "supply chain"
-        ]
-    },
-    {
-        "titel": "Public Policy & Verwaltungswissenschaft",
-        "chat_id": os.environ.get("CHAT_ID_POLICY"),
-        "topics": "T10289",
-        "ziel_anzahl": 10,
-        # Hält reine Philosophie- und Ideengeschichte-Texte aus der Verwaltungspraxis fern
-        "exclude_terms": [
-            "habermas", "adorno", "hegel", "kant's", "kantian", 
-            "ludwig von mises", "ideology critique", "metaphysics", "theology"
-        ]
-    }
-]
-
-def lade_gesehene_ids():
-    if not os.path.exists(SEEN_FILE):
-        return set()
-    with open(SEEN_FILE, "r", encoding="utf-8") as f:
-        return {line.strip() for line in f if line.strip()}
-
-def speichere_neue_ids(bestehende_ids, neue_ids):
-    aktualisiert = list(bestehende_ids) + list(neue_ids)
-    if len(aktualisiert) > 2000:
-        aktualisiert = aktualisiert[-2000:]
-    with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        for item_id in aktualisiert:
-            f.write(f"{item_id}\n")
-
-def sende_telegram(chat_id, text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "text": text,
+        "text": nachricht_text,
         "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-    res = requests.post(url, json=payload, timeout=10)
-    res.raise_for_status()
-
-def ermittle_country_code(paper):
-    authorships = paper.get("authorships", [])
-    for aut in authorships:
-        for inst in aut.get("institutions", []):
-            cc = inst.get("country_code")
-            if cc:
-                return cc.upper()
-    return "UNKNOWN"
-
-gesehene_ids = lade_gesehene_ids()
-gesamt_neue_ids = []
-
-heute = datetime.date.today()
-datum_str = heute.strftime("%d.%m.%Y")
-start = (heute - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
-
-bereits_belieferte_chats = set()
-
-for kanal in KANAELE:
-    chat_id = kanal.get("chat_id")
-    if not chat_id or not BOT_TOKEN:
-        print(f"Übersprungen: Kein Secret für '{kanal['titel']}'.")
-        continue
-
-    chat_id = str(chat_id).strip()
-    if chat_id in bereits_belieferte_chats:
-        continue
-
-    # Kombinierte Ausschlussliste speziell für diesen Kanal
-    kanal_ausschluss = GLOBAL_AUSSCHLUSS + kanal.get("exclude_terms", [])
-
-    # Filter mit harter Domänen-Sperre (domain.id:2 = Social Sciences)
-    filter_string = (
-        f"type:article,"
-        f"primary_location.source.type:journal,"
-        f"is_paratext:false,"
-        f"has_abstract:true,"
-        f"language:de|en,"
-        f"from_publication_date:{start},"
-        f"primary_topic.domain.id:2,"
-        f"primary_topic.id:{kanal['topics']}"
-    )
-
-    params = {
-        "filter": filter_string,
-        "sort": "publication_date:desc",
-        "per_page": 100
+        "disable_web_page_preview": False
     }
 
     try:
-        res = requests.get("https://api.openalex.org/works", params=params, timeout=15)
-        res.raise_for_status()
-        roh_treffer = res.json().get("results", [])
+        res = requests.post(url, json=payload, timeout=8)
+        if not res.ok:
+            try:
+                antwort = res.json()
+                grund = antwort.get("description", res.text)
+            except Exception:
+                grund = res.text
+            st.error(f"Telegram-Fehler ({res.status_code}): {grund}")
+            return False
+        return True
     except Exception as e:
-        print(f"Fehler bei OpenAlex-Abfrage für {kanal['titel']}: {e}")
-        continue
+        st.error(f"Verbindungsfehler zu Telegram: {e}")
+        return False
 
-    bereinigte_treffer = []
-    journal_counter = {}
-    region_counter = {}
+# --- HILFSFUNKTIONEN (CACHING & TEXTVERARBEITUNG) ---
 
-    for p in roh_treffer:
-        p_id = p.get("id")
-        titel_raw = (p.get("title") or "").strip()
-        titel_lower = titel_raw.lower().rstrip(".")
-        journal_id = (p.get("primary_location") or {}).get("source", {}).get("id")
-        country = ermittle_country_code(p)
+@st.cache_data(show_spinner=False, ttl=3600)
+def lade_daten_von_api(url, params):
+    """Holt Daten von OpenAlex und cacht das Ergebnis für 1 Stunde."""
+    res = requests.get(url, params=params, timeout=12)
+    res.raise_for_status()
+    return res.json().get("results", [])
 
-        if not p_id or not titel_raw:
-            continue
-        if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
-            continue
-        # Prüft sowohl globale als auch kanalspezifische Ausschlüsse
-        if any(term in titel_lower for term in kanal_ausschluss):
-            continue
-        if p_id in gesehene_ids or p_id in gesamt_neue_ids:
-            continue
+def rekonstruiere_abstract(inverted_index):
+    """Rekonstruiert den Fließtext aus dem Inverted Index von OpenAlex."""
+    if not inverted_index or not isinstance(inverted_index, dict):
+        return None
+    wort_positionen = []
+    for wort, positionen in inverted_index.items():
+        for pos in positionen:
+            wort_positionen.append((pos, wort))
+    wort_positionen.sort(key=lambda x: x[0])
+    return " ".join([wort for _, wort in wort_positionen])
 
-        # Journal- und Regions-Bremse (max. 2 pro Journal, max. 2 pro Land)
-        if journal_id:
-            if journal_counter.get(journal_id, 0) >= 2:
-                continue
-        if country != "UNKNOWN":
-            if region_counter.get(country, 0) >= 2:
-                continue
+@st.cache_data(show_spinner=False)
+def uebersetze_ins_deutsche(text):
+    """Übersetzt das Abstract blockweise ins Deutsche."""
+    if not text:
+        return ""
+    try:
+        tr = Translator(from_lang="en", to_lang="de")
+        saetze = text.split(". ")
+        bloecke, aktueller_block = [], ""
+        for satz in saetze:
+            if len(aktueller_block) + len(satz) < 400:
+                aktueller_block += satz + ". "
+            else:
+                bloecke.append(aktueller_block)
+                aktueller_block = satz + ". "
+        if aktueller_block:
+            bloecke.append(aktueller_block)
 
-        if journal_id:
-            journal_counter[journal_id] = journal_counter.get(journal_id, 0) + 1
-        if country != "UNKNOWN":
-            region_counter[country] = region_counter.get(country, 0) + 1
+        uebersetzte_bloecke = [tr.translate(b) for b in bloecke]
+        return " ".join(uebersetzte_bloecke)
+    except Exception:
+        return "Übersetzung konnte nicht geladen werden. Bitte das englische Original lesen."
 
-        bereinigte_treffer.append(p)
-        gesamt_neue_ids.append(p_id)
+# --- HAUPTSEITE ---
 
-        if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
-            break
+st.title("📚 PoliSci Newsticker")
+st.caption("Aktuelle internationale politikwissenschaftliche Veröffentlichungen.")
 
-    # Falls durch die Limits noch keine 10 voll sind: Auffüllen aus passenden Treffern
-    if len(bereinigte_treffer) < kanal["ziel_anzahl"]:
-        for p in roh_treffer:
-            p_id = p.get("id")
-            titel_raw = (p.get("title") or "").strip()
-            titel_lower = titel_raw.lower().rstrip(".")
+# --- SEITENLEISTE (HARMONISIERTE SACHGEBIETE) ---
 
-            if not p_id or not titel_raw or p_id in gesehene_ids or p_id in gesamt_neue_ids:
-                continue
-            if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
-                continue
-            if any(term in titel_lower for term in kanal_ausschluss):
-                continue
+# Exakt synchron zu den geprüften Topics aus daily_poster.py
+SACHGEBIETE = {
+    "Alle Teilbereiche (Politikwissenschaft)": None,
+    "Internationale Beziehungen & Außenpolitik": "T10053|T11168",
+    "Vergleichende Regierungslehre & Wahlsysteme": "T10108|T11397|T11742",
+    "Politische Theorie & Ideengeschichte": "T10718|T13138|T11997",
+    "Public Policy & Verwaltungswissenschaft": "T10289",
+}
 
-            bereinigte_treffer.append(p)
-            gesamt_neue_ids.append(p_id)
-            if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
-                break
+st.sidebar.header("🔍 Filteroptionen")
+suchbegriff = st.sidebar.text_input("Schlagwortsuche:", placeholder="z. B. Populismus, Koalition, Sanctions...")
+gewaehltes_gebiet = st.sidebar.selectbox("Sachgebiet eingrenzen:", list(SACHGEBIETE.keys()))
+tage_zurueck = st.sidebar.slider("Zeitraum (letzte X Tage):", min_value=7, max_value=60, value=30)
+anzahl = st.sidebar.slider("Anzahl der Einträge:", min_value=5, max_value=30, value=10)
 
-    if bereinigte_treffer:
-        parts = [f"<b>📢 PoliSci Ticker: {kanal['titel']}</b>\n<i>Ausgabe vom {datum_str} ({len(bereinigte_treffer)} Papers):</i>\n"]
+nur_oa = st.sidebar.checkbox("Nur Open Access (frei lesbar)")
+nur_mit_abstract = st.sidebar.checkbox("Nur Papers mit Zusammenfassung anzeigen", value=True)
+
+# Datumsfenster berechnen
+heute = datetime.date.today().strftime("%Y-%m-%d")
+start_datum = (datetime.date.today() - datetime.timedelta(days=tage_zurueck)).strftime("%Y-%m-%d")
+
+# Strikte disziplinäre Filterregeln
+filter_regeln = [
+    "type:article",
+    "primary_location.source.type:journal",
+    "language:de|en",
+    "is_paratext:false",
+    "primary_topic.domain.id:2",  # Schließt Naturwissenschaften und Medizin aus
+    f"from_publication_date:{start_datum}",
+    f"to_publication_date:{heute}",
+]
+
+if nur_mit_abstract:
+    filter_regeln.append("has_abstract:true")
+
+spezifische_topics = SACHGEBIETE[gewaehltes_gebiet]
+if spezifische_topics:
+    filter_regeln.append(f"primary_topic.id:{spezifische_topics}")
+else:
+    # Übergeordnetes Fachgebiet für Soziologie & Politikwissenschaft
+    filter_regeln.append("primary_topic.subfield.id:3312")
+
+if nur_oa:
+    filter_regeln.append("is_oa:true")
+
+query_params = {
+    "filter": ",".join(filter_regeln),
+    "sort": "publication_date:desc",
+    "per_page": anzahl
+}
+
+if suchbegriff.strip():
+    orig = suchbegriff.strip()
+    try:
+        tr_suche = Translator(from_lang="de", to_lang="en")
+        trans = tr_suche.translate(orig)
+        if trans and "error" not in trans.lower() and trans.lower() != orig.lower():
+            query_params["search"] = f'"{orig}" OR "{trans}"'
+            st.info(f"🔎 Suche kombiniert (DE + EN): **{orig}** | **{trans}**")
+        else:
+            query_params["search"] = f'"{orig}"'
+    except Exception:
+        query_params["search"] = f'"{orig}"'
+
+# --- DATENABRUF ---
+
+with st.spinner("Lade Publikationen..."):
+    try:
+        treffer = lade_daten_von_api("https://api.openalex.org/works", query_params)
+    except Exception as e:
+        st.error(f"Fehler beim Laden der Publikationen: {e}")
+        treffer = []
+
+st.markdown(f"**Gefundene Veröffentlichungen:** {len(treffer)}")
+
+# --- TELEGRAM-SAMMELVERSAND IN DER SIDEBAR ---
+if treffer:
+    st.sidebar.divider()
+    st.sidebar.subheader("📲 Telegram Push")
+    if st.sidebar.button("Top 5 Treffer an Telegram senden"):
+        gebiet_safe = html.escape(gewaehltes_gebiet)
+        nachrichten_teile = [f"<b>📚 PoliSci Newsticker: Top-Funde</b>\n<i>Filter: {gebiet_safe}</i>\n"]
+        for p in treffer[:5]:
+            p_titel = html.escape(p.get("title") or "Kein Titel")
+            p_link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
+            if p_link:
+                nachrichten_teile.append(f"• <b>{p_titel}</b>\n  🔗 <a href='{p_link}'>Zum Artikel</a>")
+            else:
+                nachrichten_teile.append(f"• <b>{p_titel}</b>")
         
-        for idx, p in enumerate(bereinigte_treffer, start=1):
-            titel = html.escape(p.get("title") or "Ohne Titel")
-            link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
-            ist_oa = p.get("open_access", {}).get("is_oa", False)
-            oa_badge = "🟢 OA" if ist_oa else "🔒 Paywall"
+        gesamt_text = "\n\n".join(nachrichten_teile)
+        if sende_telegram_nachricht(gesamt_text):
+            st.sidebar.success("Erfolgreich an Telegram übermittelt!")
 
-            autoren_liste = [a["author"]["display_name"] for a in p.get("authorships", [])]
-            autor_text = f"{autoren_liste[0]} et al." if len(autoren_liste) > 1 else (autoren_liste[0] if autoren_liste else "Unbekannt")
+if not treffer:
+    st.warning("Keine Treffer im gewählten Zeitraum. Erweitere das Zeitfenster oder passe den Suchbegriff an.")
 
-            zeile = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autor_text)}</i> • {oa_badge}"
+# --- FEED ANZEIGEN ---
+
+for idx, eintrag in enumerate(treffer):
+    titel = eintrag.get("title") or "Kein Titel"
+    datum = eintrag.get("publication_date") or "Unbekannt"
+    sprache = eintrag.get("language", "en").upper()
+    topic_name = (eintrag.get("primary_topic") or {}).get("display_name", "Politikwissenschaft")
+    
+    autoren_liste = [a["author"]["display_name"] for a in eintrag.get("authorships", [])]
+    autoren = ", ".join(autoren_liste) if autoren_liste else "Unbekannte Autor:innen"
+    
+    ort = eintrag.get("primary_location") or {}
+    journal = (ort.get("source") or {}).get("display_name", "Fachzeitschrift")
+    link = eintrag.get("doi") or ort.get("landing_page_url")
+    oa_badge = "🟢 Open Access" if eintrag.get("open_access", {}).get("is_oa", False) else "🔒 Paywall"
+
+    abstract_text = rekonstruiere_abstract(eintrag.get("abstract_inverted_index"))
+
+    with st.container():
+        st.markdown(f"### {titel}")
+        st.caption(f"📌 {topic_name} • 🌐 {sprache} • {oa_badge}")
+        st.markdown(f"**Autor:innen:** {autoren}")
+        st.markdown(f"**Erschienen am:** `{datum}` in *{journal}*")
+        
+        col_link, col_telegram = st.columns([1, 1])
+        with col_link:
             if link:
-                zeile += f" • <a href='{link}'>Link</a>"
-            parts.append(zeile)
+                st.link_button("Zum Volltext / Verlag ↗", link)
+            else:
+                st.caption("Kein Direktlink vorhanden.")
+        
+        with col_telegram:
+            if st.button("📲 Paper an Telegram senden", key=f"tg_{idx}"):
+                titel_safe = html.escape(titel)
+                autoren_safe = html.escape(autoren)
+                journal_safe = html.escape(journal)
+                
+                text_block = (
+                    f"<b>📚 PoliSci Neuzugang</b>\n\n"
+                    f"<b>Titel:</b> {titel_safe}\n"
+                    f"<b>Autor:innen:</b> {autoren_safe}\n"
+                    f"<b>Journal:</b> {journal_safe} ({datum})\n"
+                )
+                if link:
+                    text_block += f"<b>Link:</b> <a href='{link}'>{link}</a>"
+                
+                if sende_telegram_nachricht(text_block):
+                    st.success("Erfolgreich gesendet!")
 
-        parts.append(f"\n🔍 <i>Abstracts, Filter & Übersetzungen in der Web-App:</i>\n👉 <a href='{APP_URL}'>PoliSci Newsticker öffnen</a>")
+        if abstract_text:
+            with st.expander("📖 Zusammenfassung lesen"):
+                st.markdown("**Originaltext:**")
+                st.write(abstract_text)
+                
+                if sprache != "DE":
+                    st.divider()
+                    if st.checkbox("Auf Deutsch übersetzen", key=f"trans_{idx}"):
+                        with st.spinner("Übersetze..."):
+                            dt_text = uebersetze_ins_deutsche(abstract_text)
+                            st.markdown("**Deutsche Fassung:**")
+                            st.info(dt_text)
+        else:
+            st.caption("ℹ️ Keine Zusammenfassung beim Verlag hinterlegt.")
 
-        try:
-            sende_telegram(chat_id, "\n\n".join(parts))
-            bereits_belieferte_chats.add(chat_id)
-            print(f"Erfolgreich {len(bereinigte_treffer)} Papers an '{kanal['titel']}' gesendet.")
-            time.sleep(2)
-        except Exception as e:
-            print(f"Fehler beim Senden an {kanal['titel']}: {e}")
-    else:
-        print(f"Keine Treffer für '{kanal['titel']}' ermittelt.")
-
-if gesamt_neue_ids:
-    speichere_neue_ids(gesehene_ids, gesamt_neue_ids)
-
-try:
-    requests.get(APP_URL, timeout=10)
-except Exception:
-    pass
+        st.divider()
