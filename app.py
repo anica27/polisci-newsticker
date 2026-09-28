@@ -1,182 +1,178 @@
 import datetime
+import html
 import streamlit as st
 import requests
-from translate import Translator
 
-st.set_page_config(page_title="PoliSci Newsticker", page_icon="📚", layout="centered")
+st.set_page_config(
+    page_title="PoliSci Newsticker",
+    page_icon="📚",
+    layout="wide"
+)
 
-# --- HILFSFUNKTIONEN (CACHING & TEXTVERARBEITUNG) ---
+# 1. Strikter globaler Ausschluss (Medizin, Naturwissenschaft, BWL & Konsumforschung)
+GLOBAL_AUSSCHLUSS = [
+    # Medizin & Biologie
+    "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
+    "striatum", "motor nucleus", "vagus", "pyroptotic", "sids",
+    "respiratory", "pulmonary", "neuromuscular", "hypoglossal",
+    "nurse", "nursing", "midwife", "midwifery", "prenatal", "clinical",
+    "patient", "therapy", "cancer", "biomedical", "molecular", "cell",
+    "hospital", "inpatient", "surgery", "disease", "pharmacology",
+    # BWL, Marketing & Konsumforschung
+    "marketing", "consumer", "msme", "smes", "supply chain", "firm performance",
+    "stock market", "tourist", "hospitality", "hotel", "logistics"
+]
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def lade_daten_von_api(url, params):
-    """Holt Daten von OpenAlex und cacht das Ergebnis für 1 Stunde."""
-    res = requests.get(url, params=params, timeout=12)
-    res.raise_for_status()
-    return res.json().get("results", [])
-
-def rekonstruiere_abstract(inverted_index):
-    """Rekonstruiert den Fließtext aus dem Inverted Index von OpenAlex."""
-    if not inverted_index or not isinstance(inverted_index, dict):
-        return None
-    wort_positionen = []
-    for wort, positionen in inverted_index.items():
-        for pos in positionen:
-            wort_positionen.append((pos, wort))
-    wort_positionen.sort(key=lambda x: x[0])
-    return " ".join([wort for _, wort in wort_positionen])
-
-@st.cache_data(show_spinner=False)
-def uebersetze_ins_deutsche(text):
-    """Übersetzt das Abstract blockweise ins Deutsche."""
-    if not text:
-        return ""
-    try:
-        tr = Translator(from_lang="en", to_lang="de")
-        saetze = text.split(". ")
-        bloecke, aktueller_block = [], ""
-        for satz in saetze:
-            if len(aktueller_block) + len(satz) < 400:
-                aktueller_block += satz + ". "
-            else:
-                bloecke.append(aktueller_block)
-                aktueller_block = satz + ". "
-        if aktueller_block:
-            bloecke.append(aktueller_block)
-
-        uebersetzte_bloecke = [tr.translate(b) for b in bloecke]
-        return " ".join(uebersetzte_bloecke)
-    except Exception:
-        return "Übersetzung konnte nicht geladen werden. Bitte das englische Original lesen."
-
-# --- HAUPTSEITE ---
-
-st.title("📚 PoliSci Newsticker")
-st.caption("Aktuelle internationale politikwissenschaftliche Veröffentlichungen.")
-
-# --- SEITENLEISTE (HARMONISIERTE SACHGEBIETE) ---
-
-# Exakt synchron zu den geprüften Topics aus daily_poster.py
-SACHGEBIETE = {
-    "Alle Teilbereiche (Politikwissenschaft)": None,
-    "Internationale Beziehungen & Außenpolitik": "T10053|T11168",
-    "Vergleichende Regierungslehre & Wahlsysteme": "T10108|T11397|T11742",
-    "Politische Theorie & Ideengeschichte": "T10718|T13138|T11997",
-    "Public Policy & Verwaltungswissenschaft": "T10289",
+UNERWUENSCHTE_TITEL = {
+    "conclusion", "conclusions", "introduction", "preface", "index",
+    "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
-st.sidebar.header("🔍 Filteroptionen")
-suchbegriff = st.sidebar.text_input("Schlagwortsuche:", placeholder="z. B. Populismus, Koalition, Sanctions...")
-gewaehltes_gebiet = st.sidebar.selectbox("Sachgebiet eingrenzen:", list(SACHGEBIETE.keys()))
-tage_zurueck = st.sidebar.slider("Zeitraum (letzte X Tage):", min_value=7, max_value=60, value=30)
-anzahl = st.sidebar.slider("Anzahl der Einträge:", min_value=5, max_value=30, value=10)
+# 2. Synchronisierte Fachbereiche & Topics
+FACHBEREICHE = {
+    "Alle Teilbereiche": {
+        "topics": "T10053|T11168|T10108|T11397|T11742|T10718|T13138|T10582|T11997|T10289",
+        "exclude": []
+    },
+    "Internationale Beziehungen & Außenpolitik": {
+        "topics": "T10053|T11168",
+        "exclude": ["epistemology", "metaphysics", "formal logic"]
+    },
+    "Vergleichende Regierungslehre & Wahlsysteme": {
+        "topics": "T10108|T11397|T11742",
+        "exclude": ["metaphysics", "theology"]
+    },
+    "Politische Theorie & Ideengeschichte": {
+        "topics": "T10718|T13138|T10582|T11997",
+        "exclude": ["econometric", "consumer", "accounting", "banking"]
+    },
+    "Public Policy & Verwaltungswissenschaft": {
+        "topics": "T10289",
+        "exclude": ["habermas", "adorno", "hegel", "kant's", "theology"]
+    }
+}
 
-nur_oa = st.sidebar.checkbox("Nur Open Access (frei lesbar)")
-nur_mit_abstract = st.sidebar.checkbox("Nur Papers mit Zusammenfassung anzeigen", value=True)
+# Header & Telegram-Hub-Hinweis
+st.title("📚 PoliSci Newsticker")
+st.markdown(
+    """
+    Kuratierte, tagesaktuelle Fachliteratur aus peer-reviewten Fachzeitschriften der Politikwissenschaft.
+    
+    👉 **Telegram-Kanalnetzwerk:** Abonniere die täglichen Ausgaben (13:00 Uhr) direkt in deinem Messenger über unseren Telegram-Ordner.
+    """
+)
 
-# Datumsfenster berechnen
-heute = datetime.date.today().strftime("%Y-%m-%d")
-start_datum = (datetime.date.today() - datetime.timedelta(days=tage_zurueck)).strftime("%Y-%m-%d")
+# Sidebar Filter
+st.sidebar.header("🔍 Filter & Einstellungen")
+ausgewaehlter_bereich = st.sidebar.selectbox("Teilbereich auswählen", list(FACHBEREICHE.keys()))
+zeitraum_tage = st.sidebar.slider("Veröffentlichungszeitraum (letzte Tage)", min_value=7, max_value=90, value=30, step=7)
+nur_open_access = st.sidebar.checkbox("Nur Open Access (frei zugänglich)", value=False)
+suchbegriff = st.sidebar.text_input("Im Titel suchen (optional)").strip().lower()
 
-# Strikte disziplinäre Filterregeln
+heute = datetime.date.today()
+start_datum = (heute - datetime.timedelta(days=zeitraum_tage)).strftime("%Y-%m-%d")
+
+# OpenAlex Filter zusammenbauen
+bereichs_daten = FACHBEREICHE[ausgewaehlter_bereich]
 filter_regeln = [
     "type:article",
     "primary_location.source.type:journal",
-    "language:de|en",
     "is_paratext:false",
-    "primary_topic.domain.id:2",  # Schließt Naturwissenschaften und Medizin aus
+    "has_abstract:true",
+    "language:de|en",
     f"from_publication_date:{start_datum}",
-    f"to_publication_date:{heute}",
+    "primary_topic.domain.id:2",  # Strikte Begrenzung auf Social Sciences
+    f"primary_topic.id:{bereichs_daten['topics']}"
 ]
 
-if nur_mit_abstract:
-    filter_regeln.append("has_abstract:true")
-
-spezifische_topics = SACHGEBIETE[gewaehltes_gebiet]
-if spezifische_topics:
-    filter_regeln.append(f"primary_topic.id:{spezifische_topics}")
-else:
-    # Übergeordnetes Fachgebiet für Soziologie & Politikwissenschaft
-    filter_regeln.append("primary_topic.subfield.id:3312")
-
-if nur_oa:
+if nur_open_access:
     filter_regeln.append("is_oa:true")
 
-query_params = {
+params = {
     "filter": ",".join(filter_regeln),
     "sort": "publication_date:desc",
-    "per_page": anzahl
+    "per_page": 50,
+    "mailto": "research-ticker@example.com"
 }
 
-if suchbegriff.strip():
-    orig = suchbegriff.strip()
-    try:
-        tr_suche = Translator(from_lang="de", to_lang="en")
-        trans = tr_suche.translate(orig)
-        if trans and "error" not in trans.lower() and trans.lower() != orig.lower():
-            query_params["search"] = f'"{orig}" OR "{trans}"'
-            st.info(f"🔎 Suche kombiniert (DE + EN): **{orig}** | **{trans}**")
-        else:
-            query_params["search"] = f'"{orig}"'
-    except Exception:
-        query_params["search"] = f'"{orig}"'
+ausschluss_begriffe = GLOBAL_AUSSCHLUSS + bereichs_daten["exclude"]
 
-# --- DATENABRUF ---
-
-with st.spinner("Lade Publikationen..."):
+# Daten abrufen
+with st.spinner("Lade aktuelle Fachpublikationen aus OpenAlex..."):
     try:
-        treffer = lade_daten_von_api("https://api.openalex.org/works", query_params)
+        res = requests.get("https://api.openalex.org/works", params=params, timeout=15)
+        res.raise_for_status()
+        daten = res.json().get("results", [])
     except Exception as e:
-        st.error(f"Fehler beim Laden der Publikationen: {e}")
-        treffer = []
+        st.error(f"Fehler beim Abrufen der Publikationen: {e}")
+        daten = []
 
-st.markdown(f"**Gefundene Veröffentlichungen:** {len(treffer)}")
+# Manuelles Filtern gegen Titelausschlüsse und Rauschen
+gefilterte_publikationen = []
+for p in daten:
+    titel = (p.get("title") or "").strip()
+    titel_lower = titel.lower().rstrip(".")
 
-if not treffer:
-    st.warning("Keine Treffer im gewählten Zeitraum. Erweitere das Zeitfenster oder passe den Suchbegriff an.")
+    if not titel or len(titel) < 15:
+        continue
+    if titel_lower in UNERWUENSCHTE_TITEL:
+        continue
+    if any(begriff in titel_lower for begriff in ausschluss_begriffe):
+        continue
+    if suchbegriff and suchbegriff not in titel_lower:
+        continue
 
-# --- FEED ANZEIGEN ---
+    gefilterte_publikationen.append(p)
 
-for idx, eintrag in enumerate(treffer):
-    titel = eintrag.get("title") or "Kein Titel"
-    datum = eintrag.get("publication_date") or "Unbekannt"
-    sprache = eintrag.get("language", "en").upper()
-    topic_name = (eintrag.get("primary_topic") or {}).get("display_name", "Politikwissenschaft")
-    
-    autoren_liste = [a["author"]["display_name"] for a in eintrag.get("authorships", [])]
-    autoren = ", ".join(autoren_liste) if autoren_liste else "Unbekannte Autor:innen"
-    
-    ort = eintrag.get("primary_location") or {}
-    journal = (ort.get("source") or {}).get("display_name", "Fachzeitschrift")
-    link = eintrag.get("doi") or ort.get("landing_page_url")
-    oa_badge = "🟢 Open Access" if eintrag.get("open_access", {}).get("is_oa", False) else "🔒 Paywall"
+# Ergebnisse anzeigen
+st.subheader(f"Ergebnisse ({len(gefilterte_publikationen)} Publikationen gefunden)")
 
-    abstract_text = rekonstruiere_abstract(eintrag.get("abstract_inverted_index"))
-
-    with st.container():
-        st.markdown(f"### {titel}")
-        st.caption(f"📌 {topic_name} • 🌐 {sprache} • {oa_badge}")
-        st.markdown(f"**Autor:innen:** {autoren}")
-        st.markdown(f"**Erschienen am:** `{datum}` in *{journal}*")
+if not gefilterte_publikationen:
+    st.info("Keine Publikationen gefunden, die den aktuellen Filterkriterien entsprechen. Erweitere eventuell den Zeitraum in der linken Leiste.")
+else:
+    for idx, p in enumerate(gefilterte_publikationen, start=1):
+        titel = p.get("title") or "Ohne Titel"
+        doi_url = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
+        pub_datum = p.get("publication_date") or "Unbekannt"
         
-        # Nur noch der Verlags-/Volltextlink (kein Telegram-Button mehr)
-        if link:
-            st.link_button("Zum Volltext / Verlag ↗", link)
-        else:
-            st.caption("Kein Direktlink vorhanden.")
+        # Open Access Status
+        ist_oa = p.get("open_access", {}).get("is_oa", False)
+        oa_status = "🟢 Open Access" if ist_oa else "🔒 Paywall"
 
-        if abstract_text:
-            with st.expander("📖 Zusammenfassung lesen"):
-                st.markdown("**Originaltext:**")
-                st.write(abstract_text)
-                
-                if sprache != "DE":
-                    st.divider()
-                    if st.checkbox("Auf Deutsch übersetzen", key=f"trans_{idx}"):
-                        with st.spinner("Übersetze..."):
-                            dt_text = uebersetze_ins_deutsche(abstract_text)
-                            st.markdown("**Deutsche Fassung:**")
-                            st.info(dt_text)
-        else:
-            st.caption("ℹ️ Keine Zusammenfassung beim Verlag hinterlegt.")
+        # Quelle / Journal
+        journal_name = (p.get("primary_location") or {}).get("source", {}).get("display_name") or "Fachzeitschrift nicht angegeben"
 
-        st.divider()
+        # Topic
+        topic_info = (p.get("primary_topic") or {}).get("display_name") or "Allgemein"
+
+        # Autoren
+        autoren = [a["author"]["display_name"] for a in p.get("authorships", [])]
+        autoren_str = ", ".join(autoren) if autoren else "Keine Autorenangabe"
+
+        # Abstract invertieren (OpenAlex Abstract Inverted Index)
+        abstract_text = ""
+        inv_index = p.get("abstract_inverted_index")
+        if inv_index:
+            wort_positionen = []
+            for wort, pos_liste in inv_index.items():
+                for pos in pos_liste:
+                    wort_positionen.append((pos, wort))
+            wort_positionen.sort()
+            abstract_text = " ".join([w[1] for w in wort_positionen])
+
+        # Card Rendering
+        with st.container():
+            st.markdown(f"### {idx}. {titel}")
+            st.caption(f"📌 **Thema:** {topic_info} • 📅 **Erschienen am:** {pub_datum} in *{journal_name}* • {oa_status}")
+            st.markdown(f"**Autor:innen:** {autoren_str}")
+
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                if doi_url:
+                    st.link_button("Zum Volltext / Verlag ↗", doi_url)
+            
+            if abstract_text:
+                with st.expander("📖 Abstract anzeigen"):
+                    st.write(abstract_text)
+
+            st.divider()
