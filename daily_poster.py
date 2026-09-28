@@ -13,13 +13,18 @@ if not BOT_TOKEN:
     print("TELEGRAM_BOT_TOKEN fehlt.")
     sys.exit(0)
 
-# Globale Ausschlüsse (Medizin & Naturwissenschaften)
+# Disziplinübergreifender Ausschluss: Naturwissenschaften, Medizin, BWL & Konsumforschung
 GLOBAL_AUSSCHLUSS = [
+    # Medizin & Biologie
     "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
     "striatum", "motor nucleus", "vagus", "pyroptotic", "sids",
     "respiratory", "pulmonary", "neuromuscular", "hypoglossal",
     "nurse", "nursing", "midwife", "midwifery", "prenatal", "clinical",
-    "patient", "therapy", "cancer", "biomedical", "molecular", "cell"
+    "patient", "therapy", "cancer", "biomedical", "molecular", "cell",
+    "hospital", "inpatient", "surgery", "disease", "pharmacology",
+    # BWL & Marketing
+    "marketing", "consumer", "msme", "smes", "supply chain", "firm performance",
+    "stock market", "tourist", "hospitality", "hotel", "logistics"
 ]
 
 UNERWUENSCHTE_TITEL = {
@@ -27,42 +32,32 @@ UNERWUENSCHTE_TITEL = {
     "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
+# Fachkanäle mit stabilen Topic-Clustern
 KANAELE = [
     {
         "titel": "Internationale Beziehungen & Außenpolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
         "topics": "T10053|T11168",
-        "ziel_anzahl": 10,
-        "exclude_terms": [
-            "formal logic", "epistemology", "epistemic", "ontology", 
-            "truth conditional", "metaphysics"
-        ]
+        "exclude_terms": ["epistemology", "metaphysics", "formal logic"]
     },
     {
         "titel": "Vergleichende Regierungslehre & Wahlsysteme",
         "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
         "topics": "T10108|T11397|T11742",
-        "ziel_anzahl": 10,
-        "exclude_terms": ["epistemology", "metaphysics"]
+        "exclude_terms": ["metaphysics", "theology"]
     },
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        "topics": "T10718|T13138|T11997",
-        "ziel_anzahl": 10,
-        "exclude_terms": [
-            "econometric", "firm performance", "stock return", "supply chain"
-        ]
+        # T10718: Political Theory, T13138: History of Political Thought, T10582: Democratic Theory, T11997: Critical Theory
+        "topics": "T10718|T13138|T10582|T11997",
+        "exclude_terms": ["econometric", "consumer", "accounting", "banking"]
     },
     {
         "titel": "Public Policy & Verwaltungswissenschaft",
         "chat_id": os.environ.get("CHAT_ID_POLICY"),
         "topics": "T10289",
-        "ziel_anzahl": 10,
-        "exclude_terms": [
-            "habermas", "adorno", "hegel", "kant's", "kantian", 
-            "ludwig von mises", "ideology critique", "metaphysics", "theology"
-        ]
+        "exclude_terms": ["habermas", "adorno", "hegel", "kant's", "theology"]
     }
 ]
 
@@ -74,8 +69,8 @@ def lade_gesehene_ids():
 
 def speichere_neue_ids(bestehende_ids, neue_ids):
     aktualisiert = list(bestehende_ids) + list(neue_ids)
-    if len(aktualisiert) > 2000:
-        aktualisiert = aktualisiert[-2000:]
+    if len(aktualisiert) > 3000:
+        aktualisiert = aktualisiert[-3000:]
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
         for item_id in aktualisiert:
             f.write(f"{item_id}\n")
@@ -88,13 +83,12 @@ def sende_telegram(chat_id, text):
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
-    res = requests.post(url, json=payload, timeout=10)
+    res = requests.post(url, json=payload, timeout=12)
     res.raise_for_status()
 
 def ermittle_country_code(paper):
-    authorships = paper.get("authorships", [])
-    for aut in authorships:
-        for inst in aut.get("institutions", []):
+    for aut in paper.get("authorships", []) or []:
+        for inst in aut.get("institutions", []) or []:
             cc = inst.get("country_code")
             if cc:
                 return cc.upper()
@@ -105,7 +99,7 @@ gesamt_neue_ids = []
 
 heute = datetime.date.today()
 datum_str = heute.strftime("%d.%m.%Y")
-start = (heute - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+start_datum = (heute - datetime.timedelta(days=60)).strftime("%Y-%m-%d")
 
 bereits_belieferte_chats = set()
 
@@ -127,7 +121,7 @@ for kanal in KANAELE:
         f"is_paratext:false,"
         f"has_abstract:true,"
         f"language:de|en,"
-        f"from_publication_date:{start},"
+        f"from_publication_date:{start_datum},"
         f"primary_topic.domain.id:2,"
         f"primary_topic.id:{kanal['topics']}"
     )
@@ -135,7 +129,8 @@ for kanal in KANAELE:
     params = {
         "filter": filter_string,
         "sort": "publication_date:desc",
-        "per_page": 100
+        "per_page": 100,
+        "mailto": "research-ticker@example.com"
     }
 
     try:
@@ -143,13 +138,14 @@ for kanal in KANAELE:
         res.raise_for_status()
         roh_treffer = res.json().get("results", [])
     except Exception as e:
-        print(f"Fehler bei Abfrage für {kanal['titel']}: {e}")
+        print(f"Fehler bei OpenAlex für {kanal['titel']}: {e}")
         continue
 
-    bereinigte_treffer = []
+    ausgewaehlte_treffer = []
     journal_counter = {}
     region_counter = {}
 
+    # Durchlauf 1: Strenge Quotenprüfung (Diversität)
     for p in roh_treffer:
         p_id = p.get("id")
         titel_raw = (p.get("title") or "").strip()
@@ -157,55 +153,57 @@ for kanal in KANAELE:
         journal_id = (p.get("primary_location") or {}).get("source", {}).get("id")
         country = ermittle_country_code(p)
 
-        if not p_id or not titel_raw:
+        if not p_id or not titel_raw or len(titel_raw) < 15:
             continue
-        if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
+        if titel_lower in UNERWUENSCHTE_TITEL:
             continue
         if any(term in titel_lower for term in kanal_ausschluss):
             continue
         if p_id in gesehene_ids or p_id in gesamt_neue_ids:
             continue
 
-        if journal_id:
-            if journal_counter.get(journal_id, 0) >= 2:
-                continue
-        if country != "UNKNOWN":
-            if region_counter.get(country, 0) >= 2:
-                continue
+        if journal_id and journal_counter.get(journal_id, 0) >= 2:
+            continue
+        if country != "UNKNOWN" and region_counter.get(country, 0) >= 3:
+            continue
 
         if journal_id:
             journal_counter[journal_id] = journal_counter.get(journal_id, 0) + 1
         if country != "UNKNOWN":
             region_counter[country] = region_counter.get(country, 0) + 1
 
-        bereinigte_treffer.append(p)
+        ausgewaehlte_treffer.append(p)
         gesamt_neue_ids.append(p_id)
 
-        if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
+        if len(ausgewaehlte_treffer) == 10:
             break
 
-    if len(bereinigte_treffer) < kanal["ziel_anzahl"]:
+    # Durchlauf 2 (Fallback): Falls nach Quote weniger als 10 da sind, restliche Plätze auffüllen
+    if len(ausgewaehlte_treffer) < 10:
         for p in roh_treffer:
             p_id = p.get("id")
             titel_raw = (p.get("title") or "").strip()
             titel_lower = titel_raw.lower().rstrip(".")
 
-            if not p_id or not titel_raw or p_id in gesehene_ids or p_id in gesamt_neue_ids:
+            if not p_id or not titel_raw or len(titel_raw) < 15:
                 continue
-            if titel_lower in UNERWUENSCHTE_TITEL or len(titel_raw) < 15:
+            if titel_lower in UNERWUENSCHTE_TITEL:
                 continue
             if any(term in titel_lower for term in kanal_ausschluss):
                 continue
+            if p_id in gesehene_ids or p_id in gesamt_neue_ids:
+                continue
 
-            bereinigte_treffer.append(p)
+            ausgewaehlte_treffer.append(p)
             gesamt_neue_ids.append(p_id)
-            if len(bereinigte_treffer) == kanal["ziel_anzahl"]:
+
+            if len(ausgewaehlte_treffer) == 10:
                 break
 
-    if bereinigte_treffer:
-        parts = [f"<b>📢 PoliSci Ticker: {kanal['titel']}</b>\n<i>Ausgabe vom {datum_str} ({len(bereinigte_treffer)} Papers):</i>\n"]
+    if ausgewaehlte_treffer:
+        parts = [f"**📢 PoliSci Ticker: {kanal['titel']}**\n*Ausgabe vom {datum_str} ({len(ausgewaehlte_treffer)} Papers):*\n"]
         
-        for idx, p in enumerate(bereinigte_treffer, start=1):
+        for idx, p in enumerate(ausgewaehlte_treffer, start=1):
             titel = html.escape(p.get("title") or "Ohne Titel")
             link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
             ist_oa = p.get("open_access", {}).get("is_oa", False)
@@ -214,17 +212,17 @@ for kanal in KANAELE:
             autoren_liste = [a["author"]["display_name"] for a in p.get("authorships", [])]
             autor_text = f"{autoren_liste[0]} et al." if len(autoren_liste) > 1 else (autoren_liste[0] if autoren_liste else "Unbekannt")
 
-            zeile = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autor_text)}</i> • {oa_badge}"
+            zeile = f"**{idx}. {titel}**\n   ✍️ *{html.escape(autor_text)}* • {oa_badge}"
             if link:
-                zeile += f" • <a href='{link}'>Link</a>"
+                zeile += f" • [Link]({link})"
             parts.append(zeile)
 
-        parts.append(f"\n🔍 <i>Abstracts, Filter & Übersetzungen in der Web-App:</i>\n👉 <a href='{APP_URL}'>PoliSci Newsticker öffnen</a>")
+        parts.append(f"\n🔍 *Abstracts, Filter & Volltexte in der Web-App:*\n👉 [PoliSci Newsticker öffnen]({APP_URL})")
 
         try:
             sende_telegram(chat_id, "\n\n".join(parts))
             bereits_belieferte_chats.add(chat_id)
-            print(f"Erfolgreich {len(bereinigte_treffer)} Papers an '{kanal['titel']}' gesendet.")
+            print(f"OK: {len(ausgewaehlte_treffer)} Papers an '{kanal['titel']}' gesendet.")
             time.sleep(2)
         except Exception as e:
             print(f"Fehler beim Senden an {kanal['titel']}: {e}")
@@ -235,6 +233,6 @@ if gesamt_neue_ids:
     speichere_neue_ids(gesehene_ids, gesamt_neue_ids)
 
 try:
-    requests.get(APP_URL, timeout=10)
+    requests.get(APP_URL, timeout=8)
 except Exception:
     pass
