@@ -49,7 +49,6 @@ KANAELE = [
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # T10718: Political Theory, T13138: History of Political Thought, T10582: Democratic Theory, T11997: Critical Theory
         "topics": "T10718|T13138|T10582|T11997",
         "exclude_terms": ["econometric", "consumer", "accounting", "banking"]
     },
@@ -145,7 +144,7 @@ for kanal in KANAELE:
     journal_counter = {}
     region_counter = {}
 
-    # Durchlauf 1: Strenge Quotenprüfung (Diversität)
+    # Durchlauf 1: Mit Diversitätsquoten
     for p in roh_treffer:
         p_id = p.get("id")
         titel_raw = (p.get("title") or "").strip()
@@ -178,7 +177,7 @@ for kanal in KANAELE:
         if len(ausgewaehlte_treffer) == 10:
             break
 
-    # Durchlauf 2 (Fallback): Falls nach Quote weniger als 10 da sind, restliche Plätze auffüllen
+    # Durchlauf 2 (Fallback): Fehlende Plätze auffüllen
     if len(ausgewaehlte_treffer) < 10:
         for p in roh_treffer:
             p_id = p.get("id")
@@ -200,6 +199,7 @@ for kanal in KANAELE:
             if len(ausgewaehlte_treffer) == 10:
                 break
 
+    # Nachricht als sauberes HTML formatieren
     if ausgewaehlte_treffer:
         parts = [f"**📢 PoliSci Ticker: {kanal['titel']}**\n*Ausgabe vom {datum_str} ({len(ausgewaehlte_treffer)} Papers):*\n"]
         
@@ -209,7 +209,7 @@ for kanal in KANAELE:
             ist_oa = p.get("open_access", {}).get("is_oa", False)
             oa_badge = "🟢 OA" if ist_oa else "🔒 Paywall"
 
-            autoren_liste = [a["author"]["display_name"] for a in p.get("authorships", [])]
+            autoren_liste = [a["author"]["display_name"] for a in p.get("authorships", []) or []]
             autor_text = f"{autoren_liste[0]} et al." if len(autoren_liste) > 1 else (autoren_liste[0] if autoren_liste else "Unbekannt")
 
             zeile = f"**{idx}. {titel}**\n   ✍️ *{html.escape(autor_text)}* • {oa_badge}"
