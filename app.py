@@ -130,7 +130,7 @@ st.subheader(f"Ergebnisse ({len(gefilterte_publikationen)} Publikationen gefunde
 if not gefilterte_publikationen:
     st.info("Keine Publikationen gefunden, die den aktuellen Filterkriterien entsprechen. Erweitere eventuell den Zeitraum in der linken Leiste.")
 else:
-    for idx, p in enumerate(gefilterte_publikationen, start=1):
+    for p in gefilterte_publikationen:
         titel = p.get("title") or "Ohne Titel"
         doi_url = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
         pub_datum = p.get("publication_date") or "Unbekannt"
@@ -162,7 +162,7 @@ else:
 
         # Card Rendering
         with st.container():
-            st.markdown(f"### {idx}. {titel}")
+            st.markdown(f"### {titel}")
             st.caption(f"📌 **Thema:** {topic_info} • 📅 **Erschienen am:** {pub_datum} in *{journal_name}* • {oa_status}")
             st.markdown(f"**Autor:innen:** {autoren_str}")
 
