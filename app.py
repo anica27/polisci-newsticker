@@ -58,7 +58,7 @@ st.markdown(
     """
     Kuratierte, tagesaktuelle Fachliteratur aus peer-reviewten Fachzeitschriften der Politikwissenschaft.
     
-    👉 **Telegram-Kanalnetzwerk:** Abonniere die täglichen Ausgaben (13:00 Uhr) direkt in deinem Messenger über unseren Telegram-Ordner.
+    👉 **Telegram-Kanalnetzwerk mit teilgebietsspezifischen Kanälen:** https://t.me/polisciticker
     """
 )
 
