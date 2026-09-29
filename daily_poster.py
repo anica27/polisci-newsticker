@@ -199,7 +199,7 @@ for kanal in KANAELE:
             if len(ausgewaehlte_treffer) == 10:
                 break
 
-    # Nachricht als sauberes HTML formatieren
+   # Nachricht als sauberes HTML formatieren
     if ausgewaehlte_treffer:
         parts = [f"**📢 PoliSci Ticker: {kanal['titel']}**\n*Ausgabe vom {datum_str} ({len(ausgewaehlte_treffer)} Papers):*\n"]
         
@@ -226,8 +226,6 @@ for kanal in KANAELE:
             time.sleep(2)
         except Exception as e:
             print(f"Fehler beim Senden an {kanal['titel']}: {e}")
-    else:
-        print(f"Keine Treffer für '{kanal['titel']}'.")
 
 if gesamt_neue_ids:
     speichere_neue_ids(gesehene_ids, gesamt_neue_ids)
