@@ -201,7 +201,10 @@ for kanal in KANAELE:
 
    # Nachricht als sauberes HTML formatieren
     if ausgewaehlte_treffer:
-        parts = [f"**📢 PoliSci Ticker: {kanal['titel']}**\n*Ausgabe vom {datum_str} ({len(ausgewaehlte_treffer)} Papers):*\n"]
+        parts = [
+            f"<b>📢 PoliSci Ticker: {kanal['titel']}</b>\n"
+            f"<i>Ausgabe vom {datum_str} ({len(ausgewaehlte_treffer)} Papers):</i>\n"
+        ]
         
         for idx, p in enumerate(ausgewaehlte_treffer, start=1):
             titel = html.escape(p.get("title") or "Ohne Titel")
@@ -212,12 +215,15 @@ for kanal in KANAELE:
             autoren_liste = [a["author"]["display_name"] for a in p.get("authorships", []) or []]
             autor_text = f"{autoren_liste[0]} et al." if len(autoren_liste) > 1 else (autoren_liste[0] if autoren_liste else "Unbekannt")
 
-            zeile = f"**{idx}. {titel}**\n   ✍️ *{html.escape(autor_text)}* • {oa_badge}"
+            zeile = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autor_text)}</i> • {oa_badge}"
             if link:
-                zeile += f" • [Link]({link})"
+                zeile += f" • <a href='{link}'>Link</a>"
             parts.append(zeile)
 
-        parts.append(f"\n🔍 *Abstracts, Filter & Volltexte in der Web-App:*\n👉 [PoliSci Newsticker öffnen]({APP_URL})")
+        parts.append(
+            f"\n<i>🔍 Abstracts, Filter & Volltexte in der Web-App:</i>\n"
+            f"👉 <a href='{APP_URL}'>PoliSci Newsticker öffnen</a>"
+        )
 
         try:
             sende_telegram(chat_id, "\n\n".join(parts))
