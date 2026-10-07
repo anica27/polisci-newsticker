@@ -38,3 +38,7 @@ jobs:
           git add seen_ids.txt
           git commit -m "Auto: Update seen_ids.txt" || echo "Keine Änderungen"
           git push
+      - name: Abhängigkeiten installieren
+        run: |
+          pip install requests langdetect
+     
