@@ -76,7 +76,7 @@ st.markdown(
 )
 
 # Sidebar Filter
-st.sidebar.header("🔍 Filter & Einstellungen")
+st.sidebar.header("Filter & Einstellungen")
 ausgewaehlter_bereich = st.sidebar.selectbox("Teilbereich auswählen", list(FACHBEREICHE.keys()))
 zeitraum_tage = st.sidebar.slider("Veröffentlichungszeitraum (letzte Tage)", min_value=7, max_value=90, value=30, step=7)
 nur_open_access = st.sidebar.checkbox("Nur Open Access (frei zugänglich)", value=False)
