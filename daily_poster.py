@@ -4,6 +4,10 @@ import os
 import sys
 import time
 import requests
+from langdetect import detect, DetectorFactory
+
+# Deterministische Ergebnisse bei der Spracherkennung
+DetectorFactory.seed = 0
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 APP_URL = "https://polisci-ticker.streamlit.app"
@@ -60,6 +64,17 @@ KANAELE = [
     }
 ]
 
+def ist_deutsch_oder_englisch(text):
+    # 1. Ausschluss nicht-lateinischer Schriften (Thai, Chinesisch/Japanisch, Kyrillisch, Arabisch)
+    if re.search(r'[\u0E00-\u0E7F\u4E00-\u9FFF\u0400-\u04FF\u0600-\u06FF]', text):
+        return False
+    # 2. Statistische Sprachprüfung für lateinische Texte (filtert z. B. Usbekisch, Bahasa)
+    try:
+        sprache = detect(text)
+        return sprache in ["de", "en"]
+    except Exception:
+        return False
+        
 def lade_gesehene_ids():
     if not os.path.exists(SEEN_FILE):
         return set()
@@ -158,6 +173,8 @@ for kanal in KANAELE:
             continue
         if any(term in titel_lower for term in kanal_ausschluss):
             continue
+        if not ist_deutsch_oder_englisch(titel_raw):
+            continue
         if p_id in gesehene_ids or p_id in gesamt_neue_ids:
             continue
 
@@ -177,7 +194,7 @@ for kanal in KANAELE:
         if len(ausgewaehlte_treffer) == 10:
             break
 
-    # Durchlauf 2 (Fallback): Fehlende Plätze auffüllen
+    # Durchlauf 2 (Fallback): Fehlende Plätze auffüllen (Sprachfilter bleibt aktiv)
     if len(ausgewaehlte_treffer) < 10:
         for p in roh_treffer:
             p_id = p.get("id")
@@ -189,6 +206,8 @@ for kanal in KANAELE:
             if titel_lower in UNERWUENSCHTE_TITEL:
                 continue
             if any(term in titel_lower for term in kanal_ausschluss):
+                continue
+            if not ist_deutsch_oder_englisch(titel_raw):
                 continue
             if p_id in gesehene_ids or p_id in gesamt_neue_ids:
                 continue
