@@ -10,7 +10,6 @@ DetectorFactory.seed = 0
 
 st.set_page_config(
     page_title="PoliSci Newsticker",
-    page_icon="📚",
     layout="wide"
 )
 
@@ -67,12 +66,12 @@ def ist_deutsch_oder_englisch(text):
         return False
         
 # Header & Telegram-Hub-Hinweis
-st.title("📚 PoliSci Newsticker")
+st.title("PoliSci Newsticker")
 st.markdown(
     """
     tagesaktuelle Fachliteratur aus peer-reviewten Fachzeitschriften der Politikwissenschaft.
     
-    👉 **Telegram-Kanalnetzwerk mit teilgebietsspezifischen Kanälen:** https://t.me/polisciticker
+    => **Telegram-Kanalnetzwerk mit teilgebietsspezifischen Kanälen:** https://t.me/polisciticker
     """
 )
 
