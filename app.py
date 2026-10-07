@@ -2,6 +2,9 @@ import datetime
 import html
 import streamlit as st
 import requests
+from langdetect import detect, DetectorFactory
+
+DetectorFactory.seed = 0
 
 st.set_page_config(
     page_title="PoliSci Newsticker",
@@ -52,11 +55,20 @@ FACHBEREICHE = {
     }
 }
 
+def ist_deutsch_oder_englisch(text):
+    if re.search(r'[\u0E00-\u0E7F\u4E00-\u9FFF\u0400-\u04FF\u0600-\u06FF]', text):
+        return False
+    try:
+        sprache = detect(text)
+        return sprache in ["de", "en"]
+    except Exception:
+        return False
+        
 # Header & Telegram-Hub-Hinweis
 st.title("📚 PoliSci Newsticker")
 st.markdown(
     """
-    Kuratierte, tagesaktuelle Fachliteratur aus peer-reviewten Fachzeitschriften der Politikwissenschaft.
+    tagesaktuelle Fachliteratur aus peer-reviewten Fachzeitschriften der Politikwissenschaft.
     
     👉 **Telegram-Kanalnetzwerk mit teilgebietsspezifischen Kanälen:** https://t.me/polisciticker
     """
@@ -118,6 +130,8 @@ for p in daten:
     if titel_lower in UNERWUENSCHTE_TITEL:
         continue
     if any(begriff in titel_lower for begriff in ausschluss_begriffe):
+        continue
+    if not ist_deutsch_oder_englisch(titel):
         continue
     if suchbegriff and suchbegriff not in titel_lower:
         continue
