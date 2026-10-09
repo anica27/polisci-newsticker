@@ -40,7 +40,7 @@ FACHBEREICHE = {
     },
     "Internationale Beziehungen & Sicherheitspolitik": {
         "topics": "T10053",
-        "exclude": ["epistemology", "metaphysics", "formal logic", "household survey", "word bank", "surveillance review", "procurement", "visual essay",
+        "exclude": ["epistemology", "metaphysics", "formal logic", "household survey", "world bank", "surveillance review", "procurement", "visual essay",
             "fertility", "microfinance"]
     },
     "Vergleichende Regierungslehre, Wahlen & Parteien": {
@@ -117,7 +117,7 @@ if nur_open_access:
 params = {
     "filter": ",".join(filter_regeln),
     "sort": "publication_date:desc",
-    "per_page": 50,
+    "per_page": 200,
     "mailto": "research-ticker@example.com"
 }
 
