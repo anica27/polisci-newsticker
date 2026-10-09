@@ -29,7 +29,7 @@ GLOBAL_AUSSCHLUSS = [
     "hospital", "inpatient", "surgery", "disease", "pharmacology",
     # BWL & Marketing
     "marketing", "consumer", "msme", "smes", "supply chain", "firm performance",
-    "stock market", "tourist", "hospitality", "hotel", "logistics",
+    "stock market", "tourist", "hospitality", "hotel", "logistics", "visual essay", "surveillance review"
     # Reine Makroökonomie, Wirtschaftsmathematik & Demographie
     "eigenequation", "sraffa", "capital-labour", "wage rate", "production function",
     "fertility rates", "monetary policy", "interest rate shock", "macroeconomic modeling",
@@ -47,8 +47,9 @@ KANAELE = [
         "titel": "Internationale Beziehungen & Sicherheitspolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
         # T10053: International Relations & Security, T11168: Foreign Policy Analysis
-        "topics": "T10053|T11168",
-        "exclude_terms": ["epistemology", "metaphysics", "formal logic", "household survey"]
+        "topics": "T10053",
+        "exclude_terms": ["epistemology", "metaphysics", "formal logic", "household survey", "world bank", "surveillance review", "procurement", "visual essay",
+            "fertility", "microfinance"]
     },
     {
         "titel": "Vergleichende Regierungslehre, Wahlen & Parteien",
