@@ -1,6 +1,7 @@
 import datetime
 import html
 import os
+import re
 import sys
 import time
 import requests
