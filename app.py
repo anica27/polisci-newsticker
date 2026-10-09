@@ -141,6 +141,9 @@ for p in daten:
         continue
     if any(begriff in titel_lower for begriff in ausschluss_begriffe):
         continue
+        must_include = bereichs_daten.get("must_include")
+    if must_include and not any(term in titel_lower for term in must_include):
+        continue
     if not ist_deutsch_oder_englisch(titel):
         continue
     if suchbegriff and suchbegriff not in titel_lower:
