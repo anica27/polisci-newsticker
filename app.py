@@ -35,24 +35,33 @@ UNERWUENSCHTE_TITEL = {
 # 2. Synchronisierte Fachbereiche & Topics
 FACHBEREICHE = {
     "Alle Teilbereiche": {
-        "topics": "T10053|T11168|T10108|T11397|T11742|T10718|T13138|T10582|T11997|T10289",
+        "topics": "T10053|T11168|T10108|T11397|T11742|T10718|T10582|T10289|T13138|T11997",
         "exclude": []
     },
-    "Internationale Beziehungen & Außenpolitik": {
+    "Internationale Beziehungen & Sicherheitspolitik": {
         "topics": "T10053|T11168",
-        "exclude": ["epistemology", "metaphysics", "formal logic"]
+        "exclude": ["epistemology", "metaphysics", "formal logic", "household survey"]
     },
-    "Vergleichende Regierungslehre & Wahlsysteme": {
+    "Vergleichende Regierungslehre, Wahlen & Parteien": {
         "topics": "T10108|T11397|T11742",
-        "exclude": ["metaphysics", "theology"]
+        "exclude": ["metaphysics", "theology", "macroeconomics"]
     },
     "Politische Theorie & Ideengeschichte": {
-        "topics": "T10718|T13138|T10582|T11997",
-        "exclude": ["econometric", "consumer", "accounting", "banking"]
+        "topics": "T10718|T10582",
+        "exclude": ["econometric", "consumer", "accounting", "banking", "policy making", "regulatory framework"]
     },
     "Public Policy & Verwaltungswissenschaft": {
         "topics": "T10289",
-        "exclude": ["habermas", "adorno", "hegel", "kant's", "theology"]
+        "exclude": ["habermas", "adorno", "hegel", "kant's", "theology", "european council", "global gateway", "external action", "foreign policy"]
+    },
+    "Europäische Union & Regionale Integration": {
+        "topics": "T10289|T10053",
+        "must_include": ["eu", "european union", "european commission", "european parliament", "council of the european", "integration", "europeanization", "brussels", "member state"],
+        "exclude": ["epistemology", "theology"]
+    },
+    "Politische Soziologie, Partizipation & Protest": {
+        "topics": "T13138|T11997",
+        "exclude": ["econometric", "consumer", "firm performance"]
     }
 }
 
