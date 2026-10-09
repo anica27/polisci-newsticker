@@ -35,12 +35,13 @@ UNERWUENSCHTE_TITEL = {
 # 2. Synchronisierte Fachbereiche & Topics
 FACHBEREICHE = {
     "Alle Teilbereiche": {
-        "topics": "T10053|T11168|T10108|T11397|T11742|T10718|T10582|T10289|T13135|T13982|T11997",
+        "topics": "T10053|T10108|T11397|T11742|T10718|T10582|T10289|T13135|T13982|T11997",
         "exclude": []
     },
     "Internationale Beziehungen & Sicherheitspolitik": {
-        "topics": "T10053|T11168",
-        "exclude": ["epistemology", "metaphysics", "formal logic", "household survey"]
+        "topics": "T10053",
+        "exclude": ["epistemology", "metaphysics", "formal logic", "household survey", "word bank", "surveillance review", "procurement", "visual essay",
+            "fertility", "microfinance"]
     },
     "Vergleichende Regierungslehre, Wahlen & Parteien": {
         "topics": "T10108|T11397|T11742",
