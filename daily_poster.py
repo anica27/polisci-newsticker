@@ -18,7 +18,7 @@ if not BOT_TOKEN:
     print("TELEGRAM_BOT_TOKEN fehlt.")
     sys.exit(0)
 
-# Disziplinübergreifender Ausschluss: Naturwissenschaften, Medizin, BWL & Konsumforschung
+# Disziplinübergreifender Ausschluss: Naturwissenschaften, Medizin, BWL, Makroökonomie & Bankenmechanik
 GLOBAL_AUSSCHLUSS = [
     # Medizin & Biologie
     "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
@@ -29,7 +29,11 @@ GLOBAL_AUSSCHLUSS = [
     "hospital", "inpatient", "surgery", "disease", "pharmacology",
     # BWL & Marketing
     "marketing", "consumer", "msme", "smes", "supply chain", "firm performance",
-    "stock market", "tourist", "hospitality", "hotel", "logistics"
+    "stock market", "tourist", "hospitality", "hotel", "logistics",
+    # Reine Makroökonomie, Wirtschaftsmathematik & Demographie
+    "eigenequation", "sraffa", "capital-labour", "wage rate", "production function",
+    "fertility rates", "monetary policy", "interest rate shock", "macroeconomic modeling",
+    "investment operations", "syndicated loan", "commercial bank", "microfinance"
 ]
 
 UNERWUENSCHTE_TITEL = {
@@ -37,45 +41,62 @@ UNERWUENSCHTE_TITEL = {
     "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
-# Fachkanäle mit stabilen Topic-Clustern
+# 6 trennscharfe Fachkanäle
 KANAELE = [
     {
-        "titel": "Internationale Beziehungen & Außenpolitik",
+        "titel": "Internationale Beziehungen & Sicherheitspolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
+        # T10053: International Relations & Security, T11168: Foreign Policy Analysis
         "topics": "T10053|T11168",
-        "exclude_terms": ["epistemology", "metaphysics", "formal logic"]
+        "exclude_terms": ["epistemology", "metaphysics", "formal logic", "household survey"]
     },
     {
-        "titel": "Vergleichende Regierungslehre & Wahlsysteme",
+        "titel": "Vergleichende Regierungslehre, Wahlen & Parteien",
         "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
+        # T10108: Electoral Systems & Voting Behavior, T11397: Legislative Politics & Parliaments, T11742: Political Parties
         "topics": "T10108|T11397|T11742",
-        "exclude_terms": ["metaphysics", "theology"]
+        "exclude_terms": ["metaphysics", "theology", "macroeconomics"]
     },
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        "topics": "T10718|T13138|T10582|T11997",
-        "exclude_terms": ["econometric", "consumer", "accounting", "banking"]
+        # T10718: Political Theory & Philosophy, T10582: History of Political Thought
+        "topics": "T10718|T10582",
+        "exclude_terms": ["econometric", "consumer", "accounting", "banking", "policy making", "regulatory framework"]
     },
     {
         "titel": "Public Policy & Verwaltungswissenschaft",
         "chat_id": os.environ.get("CHAT_ID_POLICY"),
+        # T10289: Public Administration & Policy Implementation
         "topics": "T10289",
-        "exclude_terms": ["habermas", "adorno", "hegel", "kant's", "theology"]
+        "exclude_terms": ["habermas", "adorno", "hegel", "kant's", "theology", "european council", "global gateway", "external action", "foreign policy"]
+    },
+    {
+        "titel": "Europäische Union & Regionale Integration",
+        "chat_id": os.environ.get("CHAT_ID_EU"),
+        # T10289 & Sub-Cluster fokussiert auf europäische Institutionen & Governance
+        "topics": "T10289|T10053",
+        "must_include": ["eu", "european union", "european commission", "european parliament", "council of the european", "integration", "europeanization", "brussels", "member state"],
+        "exclude_terms": ["epistemology", "theology"]
+    },
+    {
+        "titel": "Politische Soziologie, Partizipation & Protest",
+        "chat_id": os.environ.get("CHAT_ID_SOZIOLOGIE"),
+        # T13138: Social Movements & Protest Studies, T11997: Political Participation & Civil Society
+        "topics": "T13138|T11997",
+        "exclude_terms": ["econometric", "consumer", "firm performance"]
     }
 ]
 
 def ist_deutsch_oder_englisch(text):
-    # 1. Ausschluss nicht-lateinischer Schriften (Thai, Chinesisch/Japanisch, Kyrillisch, Arabisch)
     if re.search(r'[\u0E00-\u0E7F\u4E00-\u9FFF\u0400-\u04FF\u0600-\u06FF]', text):
         return False
-    # 2. Statistische Sprachprüfung für lateinische Texte (filtert z. B. Usbekisch, Bahasa)
     try:
         sprache = detect(text)
         return sprache in ["de", "en"]
     except Exception:
         return False
-        
+
 def lade_gesehene_ids():
     if not os.path.exists(SEEN_FILE):
         return set()
@@ -129,6 +150,7 @@ for kanal in KANAELE:
         continue
 
     kanal_ausschluss = GLOBAL_AUSSCHLUSS + kanal.get("exclude_terms", [])
+    must_include = kanal.get("must_include")
 
     filter_string = (
         f"type:article,"
@@ -160,7 +182,7 @@ for kanal in KANAELE:
     journal_counter = {}
     region_counter = {}
 
-    # Durchlauf 1: Mit Diversitätsquoten
+    # Durchlauf 1: Mit Quoten
     for p in roh_treffer:
         p_id = p.get("id")
         titel_raw = (p.get("title") or "").strip()
@@ -173,6 +195,8 @@ for kanal in KANAELE:
         if titel_lower in UNERWUENSCHTE_TITEL:
             continue
         if any(term in titel_lower for term in kanal_ausschluss):
+            continue
+        if must_include and not any(term in titel_lower for term in must_include):
             continue
         if not ist_deutsch_oder_englisch(titel_raw):
             continue
@@ -195,7 +219,7 @@ for kanal in KANAELE:
         if len(ausgewaehlte_treffer) == 10:
             break
 
-    # Durchlauf 2 (Fallback): Fehlende Plätze auffüllen (Sprachfilter bleibt aktiv)
+    # Durchlauf 2 (Fallback): Fehlende Plätze auffüllen
     if len(ausgewaehlte_treffer) < 10:
         for p in roh_treffer:
             p_id = p.get("id")
@@ -207,6 +231,8 @@ for kanal in KANAELE:
             if titel_lower in UNERWUENSCHTE_TITEL:
                 continue
             if any(term in titel_lower for term in kanal_ausschluss):
+                continue
+            if must_include and not any(term in titel_lower for term in must_include):
                 continue
             if not ist_deutsch_oder_englisch(titel_raw):
                 continue
