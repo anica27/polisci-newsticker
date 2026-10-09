@@ -35,7 +35,7 @@ UNERWUENSCHTE_TITEL = {
 # 2. Synchronisierte Fachbereiche & Topics
 FACHBEREICHE = {
     "Alle Teilbereiche": {
-        "topics": "T10053|T11168|T10108|T11397|T11742|T10718|T10582|T10289|T13138|T11997",
+        "topics": "T10053|T11168|T10108|T11397|T11742|T10718|T10582|T10289|T11997|T13135|T13982",
         "exclude": []
     },
     "Internationale Beziehungen & Sicherheitspolitik": {
@@ -60,10 +60,13 @@ FACHBEREICHE = {
         "exclude": ["epistemology", "theology"]
     },
     "Politische Soziologie, Partizipation & Protest": {
-        "topics": "T13138|T11997",
-        "exclude": ["econometric", "consumer", "firm performance"]
+        # T13135: Protests & Social Movements, T13982: Social Movements & Identity, T11997: Participation & Civil Society
+        "topics": "T13135|T13982|T11997",
+        "exclude": [
+            "econometric", "consumer", "firm performance", "taxation", 
+            "fiscal", "tax law", "tax evasion", "revenue extraction", "better regulation"
+        ]
     }
-}
 
 def ist_deutsch_oder_englisch(text):
     if re.search(r'[\u0E00-\u0E7F\u4E00-\u9FFF\u0400-\u04FF\u0600-\u06FF]', text):
