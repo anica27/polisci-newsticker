@@ -82,9 +82,11 @@ KANAELE = [
     {
         "titel": "Politische Soziologie, Partizipation & Protest",
         "chat_id": os.environ.get("CHAT_ID_SOZIOLOGIE"),
-        # T13138: Social Movements & Protest Studies, T11997: Political Participation & Civil Society
-        "topics": "T13138|T11997",
-        "exclude_terms": ["econometric", "consumer", "firm performance"]
+        # T13135, T13982, T11997 statt T13138!
+        "topics": "T13135|T13982|T11997",
+        "exclude_terms": [
+            "econometric", "consumer", "firm performance", "taxation", 
+            "fiscal", "tax law", "tax evasion", "revenue extraction", "better regulation"]
     }
 ]
 
