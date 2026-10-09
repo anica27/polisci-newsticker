@@ -28,6 +28,8 @@ jobs:
           CHAT_ID_VERGLEICH: ${{ secrets.CHAT_ID_VERGLEICH }}
           CHAT_ID_THEORIE: ${{ secrets.CHAT_ID_THEORIE }}
           CHAT_ID_POLICY: ${{ secrets.CHAT_ID_POLICY }}
+          CHAT_ID_EU: ${{ secrets.CHAT_ID_EU }}
+          CHAT_ID_SOZIOLOGIE: ${{ secrets.CHAT_ID_SOZIOLOGIE }}
         run: |
           python daily_poster.py
 
