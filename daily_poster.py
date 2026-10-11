@@ -60,20 +60,26 @@ KANAELE = [
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # T10582 (Ideengeschichte) & T12752 (Demokratietheorie) statt T10718 (Klinische Bioethik)
-        "topics": "T10582|T12752",
-        "exclude": ["econometric", "consumer", "accounting", "banking", "policy making", "regulatory framework"]
+        "topics": "T10582|T12752|T11447",
+        "exclude_terms": [
+            # Wirtschaft & BWL
+            "econometric", "consumer", "accounting", "banking", "policy making",
+            # Medizin & Bioethik
+            "neonatal", "biobank", "clinical", "hiv", "general practice", "participants' altruism", "trial",
+            # IB & Außenpolitik (gehört in Kanal 1)
+            "peacekeeping", "security council", "gaza", "united nations", "r2p", "asymmetric warfare", "foreign policy"
+        ]
     },
     {
         "titel": "Public Policy & Verwaltungswissenschaft",
         "chat_id": os.environ.get("CHAT_ID_POLICY"),
-        # T10289: Public Administration & Policy Implementation
         "topics": "T10289",
         "exclude_terms": [
             "habermas", "adorno", "hegel", "kant's", "theology",
             "external action", "foreign policy",
-            # EU & Europäische Institutionen radikal sperren:
-            "european", "europäisch", "supranational", "brussels", "euro-mediterranean"
+            # EU-, Europa- & Integrationsbegriffe vollständig sperren:
+            "europe", "european", "brexit", "euro", "eurosceptic", "euroscepticism",
+            "spinelli", "trilogues", "commission", "council of europe", "subsidiarity"
         ]
     },
     {
@@ -217,6 +223,9 @@ for kanal in KANAELE:
             if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
                 if re.search(r"\beu\b", titel_lower) or "european" in titel_lower:
                     continue
+            if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
+                if re.search(r'\b(eu|emu)\b', titel_lower) or any(w in titel_lower for w in ["europe", "brexit", "eurosceptic"]):
+                    continue
             if any(term in titel_lower for term in kanal_ausschluss):
                 continue
             if must_include and not any(term in titel_lower for term in must_include):
@@ -258,6 +267,9 @@ for kanal in KANAELE:
                 # Für Public Policy: Jegliche EU-Bezüge strikt in den EU-Kanal verbannen:
                 if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
                     if re.search(r"\beu\b", titel_lower) or "european" in titel_lower:
+                        continue
+                if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
+                     if re.search(r'\b(eu|emu)\b', titel_lower) or any(w in titel_lower for w in ["europe", "brexit", "eurosceptic"]):
                         continue
                 if any(term in titel_lower for term in kanal_ausschluss):
                     continue
