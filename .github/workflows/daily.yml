@@ -30,6 +30,7 @@ jobs:
           CHAT_ID_POLICY: ${{ secrets.CHAT_ID_POLICY }}
           CHAT_ID_EU: ${{ secrets.CHAT_ID_EU }}
           CHAT_ID_SOZIOLOGIE: ${{ secrets.CHAT_ID_SOZIOLOGIE }}
+          OPENALEX_MAILTO: ${{ secrets.OPENALEX_MAILTO }}
         run: |
           python daily_poster.py
 
