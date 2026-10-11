@@ -19,6 +19,7 @@ if not BOT_TOKEN:
     sys.exit(0)
 
 # Disziplinübergreifender Ausschluss: Naturwissenschaften, Medizin, BWL, Makroökonomie & Bankenmechanik
+# 1. Strikter globaler Ausschluss (Medizin, Naturwissenschaft, BWL & Konsumforschung)
 GLOBAL_AUSSCHLUSS = [
     # Medizin & Biologie
     "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
@@ -27,13 +28,10 @@ GLOBAL_AUSSCHLUSS = [
     "nurse", "nursing", "midwife", "midwifery", "prenatal", "clinical",
     "patient", "therapy", "cancer", "biomedical", "molecular", "cell",
     "hospital", "inpatient", "surgery", "disease", "pharmacology",
-    # BWL & Marketing
+    "hiv", "genomic", "randomised", "randomized", "trial", "enrolment",
+    # BWL, Marketing & Konsumforschung
     "marketing", "consumer", "msme", "smes", "supply chain", "firm performance",
-    "stock market", "tourist", "hospitality", "hotel", "logistics", "visual essay", "surveillance review",
-    # Reine Makroökonomie, Wirtschaftsmathematik & Demographie
-    "eigenequation", "sraffa", "capital-labour", "wage rate", "production function",
-    "fertility rates", "monetary policy", "interest rate shock", "macroeconomic modeling",
-    "investment operations", "syndicated loan", "commercial bank", "microfinance"
+    "stock market", "tourist", "hospitality", "hotel", "logistics"
 ]
 
 UNERWUENSCHTE_TITEL = {
@@ -41,53 +39,61 @@ UNERWUENSCHTE_TITEL = {
     "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
-# 6 trennscharfe Fachkanäle
+# 2. Fachkanäle (exakt nach deiner app.py-Struktur, nur T11997 und T10718 bereinigt)
 KANAELE = [
     {
         "titel": "Internationale Beziehungen & Sicherheitspolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
-        # T10053: International Relations & Security, T11168: Foreign Policy Analysis
         "topics": "T10053",
-        "exclude_terms": ["epistemology", "metaphysics", "formal logic", "household survey", "world bank", "surveillance review", "procurement", "visual essay",
-            "fertility", "microfinance"]
+        "exclude": [
+            "epistemology", "metaphysics", "formal logic", "household survey",
+            "world bank", "surveillance review", "procurement", "visual essay",
+            "fertility", "microfinance"
+        ]
     },
     {
         "titel": "Vergleichende Regierungslehre, Wahlen & Parteien",
         "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
-        # T10108: Electoral Systems & Voting Behavior, T11397: Legislative Politics & Parliaments, T11742: Political Parties
         "topics": "T10108|T11397|T11742",
-        "exclude_terms": ["metaphysics", "theology", "macroeconomics"]
+        "exclude": ["metaphysics", "theology", "macroeconomics"]
     },
     {
         "titel": "Politische Theorie & Ideengeschichte",
         "chat_id": os.environ.get("CHAT_ID_THEORIE"),
-        # T10718: Political Theory & Philosophy, T10582: History of Political Thought
-        "topics": "T10718|T10582",
-        "exclude_terms": ["econometric", "consumer", "accounting", "banking", "policy making", "regulatory framework"]
+        # T10582 (Ideengeschichte) & T12752 (Demokratietheorie) statt T10718 (Klinische Bioethik)
+        "topics": "T10582|T12752",
+        "exclude": ["econometric", "consumer", "accounting", "banking", "policy making", "regulatory framework"]
     },
     {
         "titel": "Public Policy & Verwaltungswissenschaft",
         "chat_id": os.environ.get("CHAT_ID_POLICY"),
-        # T10289: Public Administration & Policy Implementation
         "topics": "T10289",
-        "exclude_terms": ["habermas", "adorno", "hegel", "kant's", "theology", "european council", "global gateway", "external action", "foreign policy"]
+        # Striktes Aussortieren von EU-Papern, damit sie nicht doppelt/falsch laufen:
+        "exclude": [
+            "habermas", "adorno", "hegel", "kant's", "theology",
+            "european council", "global gateway", "external action", "foreign policy",
+            "european union", "european commission", "european parliament", "eu policy", "eu regulation"
+        ]
     },
     {
         "titel": "Europäische Union & Regionale Integration",
         "chat_id": os.environ.get("CHAT_ID_EU"),
-        # T10289 & Sub-Cluster fokussiert auf europäische Institutionen & Governance
         "topics": "T10289|T10053",
-        "must_include": ["eu", "european union", "european commission", "european parliament", "council of the european", "integration", "europeanization", "brussels", "member state"],
-        "exclude_terms": ["epistemology", "theology"]
+        "must_include": [
+            "eu", "european union", "european commission", "european parliament",
+            "council of the european", "integration", "europeanization", "brussels", "member state"
+        ],
+        "exclude": ["epistemology", "theology"]
     },
     {
         "titel": "Politische Soziologie, Partizipation & Protest",
         "chat_id": os.environ.get("CHAT_ID_SOZIOLOGIE"),
-        # T13135, T13982, T11997 statt T13138!
-        "topics": "T13135|T13982|T11997",
-        "exclude_terms": [
-            "econometric", "consumer", "firm performance", "taxation", 
-            "fiscal", "tax law", "tax evasion", "revenue extraction", "better regulation"]
+        # T13135 (Bewegungen) & T13982 (Zivilgesellschaft) - T11997 (Kognitions-Agency) entfernt!
+        "topics": "T13135|T13982",
+        "exclude": [
+            "econometric", "consumer", "firm performance", "taxation",
+            "fiscal", "tax law", "tax evasion", "revenue extraction", "better regulation"
+        ]
     }
 ]
 
@@ -203,6 +209,9 @@ for kanal in KANAELE:
                 continue
             if titel_lower in UNERWUENSCHTE_TITEL:
                 continue
+            # Antworten, Debattenbeiträge und Länderberichte abfangen:
+            if any(muster in titel_lower for muster in ["reply to", "response to", "responses to", "country report"]):
+                continue
             if any(term in titel_lower for term in kanal_ausschluss):
                 continue
             if must_include and not any(term in titel_lower for term in must_include):
@@ -237,6 +246,9 @@ for kanal in KANAELE:
                 if not p_id or not titel_raw or len(titel_raw) < 15:
                     continue
                 if titel_lower in UNERWUENSCHTE_TITEL:
+                    continue
+                # Antworten, Debattenbeiträge und Länderberichte abfangen:
+                if any(muster in titel_lower for muster in ["reply to", "response to", "responses to", "country report"]):
                     continue
                 if any(term in titel_lower for term in kanal_ausschluss):
                     continue
