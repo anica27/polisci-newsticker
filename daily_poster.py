@@ -161,14 +161,14 @@ for kanal in KANAELE:
     must_include = kanal.get("must_include")
 
     filter_string = (
-    f"type:article,"
-    f"primary_location.source.type:journal,"
-    f"is_paratext:false,"
-    f"has_abstract:true,"
-    f"language:de|en,"
-    f"from_publication_date:{start_datum},"
-    f"primary_topic.id:{kanal['topics']}"
-)
+        f"type:article,"
+        f"primary_location.source.type:journal,"
+        f"is_paratext:false,"
+        f"has_abstract:true,"
+        f"language:de|en,"
+        f"from_publication_date:{start_datum},"
+        f"primary_topic.id:{kanal['topics']}"
+    )
 
     params = {
         "filter": filter_string,
@@ -181,6 +181,7 @@ for kanal in KANAELE:
         res = requests.get("https://api.openalex.org/works", params=params, timeout=15)
         res.raise_for_status()
         roh_treffer = res.json().get("results", [])
+        print(f"OpenAlex lieferte {len(roh_treffer)} Roh-Treffer für {kanal['titel']}")
     except Exception as e:
         print(f"Fehler bei OpenAlex für {kanal['titel']}: {e}")
         continue
@@ -222,12 +223,11 @@ for kanal in KANAELE:
                 region_counter[country] = region_counter.get(country, 0) + 1
 
             ausgewaehlte_treffer.append(p)
-            gesamt_neue_ids.append(p_id)
 
             if len(ausgewaehlte_treffer) == 10:
                 break
 
-        # Durchlauf 2 (Fallback)
+        # Durchlauf 2 (Fallback): Fehlende Plätze auffüllen
         if len(ausgewaehlte_treffer) < 10:
             for p in roh_treffer:
                 p_id = p.get("id")
@@ -247,12 +247,16 @@ for kanal in KANAELE:
                 if p_id in gesehene_ids or p_id in gesamt_neue_ids:
                     continue
 
+                # Bereits in Durchlauf 1 ausgewählte Paper überspringen
+                if any(x.get("id") == p_id for x in ausgewaehlte_treffer):
+                    continue
+
                 ausgewaehlte_treffer.append(p)
-                gesamt_neue_ids.append(p_id)
 
                 if len(ausgewaehlte_treffer) == 10:
                     break
 
+        # Nachricht zusammenstellen und versenden
         if ausgewaehlte_treffer:
             parts = [
                 f"<b>📢 PoliSci Ticker: {kanal['titel']}</b>\n"
@@ -281,6 +285,13 @@ for kanal in KANAELE:
             try:
                 sende_telegram(chat_id, "\n\n".join(parts))
                 bereits_belieferte_chats.add(chat_id)
+
+                # Erst NACH erfolgreichem Senden werden die IDs als "gesehen" markiert
+                for p in ausgewaehlte_treffer:
+                    p_id = p.get("id")
+                    if p_id:
+                        gesamt_neue_ids.append(p_id)
+
                 print(f"OK: {len(ausgewaehlte_treffer)} Papers an '{kanal['titel']}' gesendet.")
                 time.sleep(2)
             except Exception as e:
