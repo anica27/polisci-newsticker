@@ -161,15 +161,14 @@ for kanal in KANAELE:
     must_include = kanal.get("must_include")
 
     filter_string = (
-        f"type:article,"
-        f"primary_location.source.type:journal,"
-        f"is_paratext:false,"
-        f"has_abstract:true,"
-        f"language:de|en,"
-        f"from_publication_date:{start_datum},"
-        f"primary_topic.domain.id:2,"
-        f"primary_topic.id:{kanal['topics']}"
-    )
+    f"type:article,"
+    f"primary_location.source.type:journal,"
+    f"is_paratext:false,"
+    f"has_abstract:true,"
+    f"language:de|en,"
+    f"from_publication_date:{start_datum},"
+    f"primary_topic.id:{kanal['topics']}"
+)
 
     params = {
         "filter": filter_string,
