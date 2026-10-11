@@ -67,12 +67,13 @@ KANAELE = [
     {
         "titel": "Public Policy & Verwaltungswissenschaft",
         "chat_id": os.environ.get("CHAT_ID_POLICY"),
+        # T10289: Public Administration & Policy Implementation
         "topics": "T10289",
-        # Striktes Aussortieren von EU-Papern, damit sie nicht doppelt/falsch laufen:
-        "exclude": [
+        "exclude_terms": [
             "habermas", "adorno", "hegel", "kant's", "theology",
-            "european council", "global gateway", "external action", "foreign policy",
-            "european union", "european commission", "european parliament", "eu policy", "eu regulation"
+            "external action", "foreign policy",
+            # EU & Europäische Institutionen radikal sperren:
+            "european", "europäisch", "supranational", "brussels", "euro-mediterranean"
         ]
     },
     {
@@ -212,6 +213,10 @@ for kanal in KANAELE:
             # Antworten, Debattenbeiträge und Länderberichte abfangen:
             if any(muster in titel_lower for muster in ["reply to", "response to", "responses to", "country report"]):
                 continue
+            # Für Public Policy: Jegliche EU-Bezüge strikt in den EU-Kanal verbannen:
+            if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
+                if re.search(r"\beu\b", titel_lower) or "european" in titel_lower:
+                    continue
             if any(term in titel_lower for term in kanal_ausschluss):
                 continue
             if must_include and not any(term in titel_lower for term in must_include):
@@ -250,6 +255,10 @@ for kanal in KANAELE:
                 # Antworten, Debattenbeiträge und Länderberichte abfangen:
                 if any(muster in titel_lower for muster in ["reply to", "response to", "responses to", "country report"]):
                     continue
+                # Für Public Policy: Jegliche EU-Bezüge strikt in den EU-Kanal verbannen:
+                if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
+                    if re.search(r"\beu\b", titel_lower) or "european" in titel_lower:
+                        continue
                 if any(term in titel_lower for term in kanal_ausschluss):
                     continue
                 if must_include and not any(term in titel_lower for term in must_include):
