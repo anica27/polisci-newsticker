@@ -29,7 +29,7 @@ GLOBAL_AUSSCHLUSS = [
     "hospital", "inpatient", "surgery", "disease", "pharmacology",
     # BWL & Marketing
     "marketing", "consumer", "msme", "smes", "supply chain", "firm performance",
-    "stock market", "tourist", "hospitality", "hotel", "logistics", "visual essay", "surveillance review"
+    "stock market", "tourist", "hospitality", "hotel", "logistics", "visual essay", "surveillance review",
     # Reine Makroökonomie, Wirtschaftsmathematik & Demographie
     "eigenequation", "sraffa", "capital-labour", "wage rate", "production function",
     "fertility rates", "monetary policy", "interest rate shock", "macroeconomic modeling",
@@ -123,6 +123,8 @@ def sende_telegram(chat_id, text):
         "disable_web_page_preview": True
     }
     res = requests.post(url, json=payload, timeout=12)
+    if not res.ok:
+        print(f"Telegram-Fehler bei Chat {chat_id}: Status {res.status_code} - Antwort: {res.text}")
     res.raise_for_status()
 
 def ermittle_country_code(paper):
@@ -143,13 +145,16 @@ start_datum = (heute - datetime.timedelta(days=60)).strftime("%Y-%m-%d")
 bereits_belieferte_chats = set()
 
 for kanal in KANAELE:
+    print(f"\n--- Bearbeite Kanal: {kanal['titel']} ---")
     chat_id = kanal.get("chat_id")
+    
     if not chat_id:
         print(f"Übersprungen: Kein Secret für '{kanal['titel']}'.")
         continue
 
     chat_id = str(chat_id).strip()
     if chat_id in bereits_belieferte_chats:
+        print(f"Übersprungen: Chat-ID {chat_id} wurde in diesem Durchlauf bereits beliefert.")
         continue
 
     kanal_ausschluss = GLOBAL_AUSSCHLUSS + kanal.get("exclude_terms", [])
@@ -185,49 +190,14 @@ for kanal in KANAELE:
     journal_counter = {}
     region_counter = {}
 
-    # Durchlauf 1: Mit Quoten
-    for p in roh_treffer:
-        p_id = p.get("id")
-        titel_raw = (p.get("title") or "").strip()
-        titel_lower = titel_raw.lower().rstrip(".")
-        journal_id = (p.get("primary_location") or {}).get("source", {}).get("id")
-        country = ermittle_country_code(p)
-
-        if not p_id or not titel_raw or len(titel_raw) < 15:
-            continue
-        if titel_lower in UNERWUENSCHTE_TITEL:
-            continue
-        if any(term in titel_lower for term in kanal_ausschluss):
-            continue
-        if must_include and not any(term in titel_lower for term in must_include):
-            continue
-        if not ist_deutsch_oder_englisch(titel_raw):
-            continue
-        if p_id in gesehene_ids or p_id in gesamt_neue_ids:
-            continue
-
-        if journal_id and journal_counter.get(journal_id, 0) >= 2:
-            continue
-        if country != "UNKNOWN" and region_counter.get(country, 0) >= 3:
-            continue
-
-        if journal_id:
-            journal_counter[journal_id] = journal_counter.get(journal_id, 0) + 1
-        if country != "UNKNOWN":
-            region_counter[country] = region_counter.get(country, 0) + 1
-
-        ausgewaehlte_treffer.append(p)
-        gesamt_neue_ids.append(p_id)
-
-        if len(ausgewaehlte_treffer) == 10:
-            break
-
-    # Durchlauf 2 (Fallback): Fehlende Plätze auffüllen
-    if len(ausgewaehlte_treffer) < 10:
+    try:
+        # Durchlauf 1: Mit Quoten
         for p in roh_treffer:
             p_id = p.get("id")
             titel_raw = (p.get("title") or "").strip()
             titel_lower = titel_raw.lower().rstrip(".")
+            journal_id = (p.get("primary_location") or {}).get("source", {}).get("id")
+            country = ermittle_country_code(p)
 
             if not p_id or not titel_raw or len(titel_raw) < 15:
                 continue
@@ -242,45 +212,85 @@ for kanal in KANAELE:
             if p_id in gesehene_ids or p_id in gesamt_neue_ids:
                 continue
 
+            if journal_id and journal_counter.get(journal_id, 0) >= 2:
+                continue
+            if country != "UNKNOWN" and region_counter.get(country, 0) >= 3:
+                continue
+
+            if journal_id:
+                journal_counter[journal_id] = journal_counter.get(journal_id, 0) + 1
+            if country != "UNKNOWN":
+                region_counter[country] = region_counter.get(country, 0) + 1
+
             ausgewaehlte_treffer.append(p)
             gesamt_neue_ids.append(p_id)
 
             if len(ausgewaehlte_treffer) == 10:
                 break
 
-   # Nachricht als sauberes HTML formatieren
-    if ausgewaehlte_treffer:
-        parts = [
-            f"<b>📢 PoliSci Ticker: {kanal['titel']}</b>\n"
-            f"<i>Ausgabe vom {datum_str} ({len(ausgewaehlte_treffer)} Papers):</i>\n"
-        ]
-        
-        for idx, p in enumerate(ausgewaehlte_treffer, start=1):
-            titel = html.escape(p.get("title") or "Ohne Titel")
-            link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
-            ist_oa = p.get("open_access", {}).get("is_oa", False)
-            oa_badge = "🟢 OA" if ist_oa else "🔒 Paywall"
+        # Durchlauf 2 (Fallback)
+        if len(ausgewaehlte_treffer) < 10:
+            for p in roh_treffer:
+                p_id = p.get("id")
+                titel_raw = (p.get("title") or "").strip()
+                titel_lower = titel_raw.lower().rstrip(".")
 
-            autoren_liste = [a["author"]["display_name"] for a in p.get("authorships", []) or []]
-            autor_text = f"{autoren_liste[0]} et al." if len(autoren_liste) > 1 else (autoren_liste[0] if autoren_liste else "Unbekannt")
+                if not p_id or not titel_raw or len(titel_raw) < 15:
+                    continue
+                if titel_lower in UNERWUENSCHTE_TITEL:
+                    continue
+                if any(term in titel_lower for term in kanal_ausschluss):
+                    continue
+                if must_include and not any(term in titel_lower for term in must_include):
+                    continue
+                if not ist_deutsch_oder_englisch(titel_raw):
+                    continue
+                if p_id in gesehene_ids or p_id in gesamt_neue_ids:
+                    continue
 
-            zeile = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autor_text)}</i> • {oa_badge}"
-            if link:
-                zeile += f" • <a href='{link}'>Link</a>"
-            parts.append(zeile)
+                ausgewaehlte_treffer.append(p)
+                gesamt_neue_ids.append(p_id)
 
-        parts.append(
-            f"\n<i>🔍 Abstracts, Filter & Volltexte in der Web-App:</i>\n"
-            f"👉 <a href='{APP_URL}'>PoliSci Newsticker öffnen</a>"
-        )
+                if len(ausgewaehlte_treffer) == 10:
+                    break
 
-        try:
-            sende_telegram(chat_id, "\n\n".join(parts))
-            bereits_belieferte_chats.add(chat_id)
-            print(f"OK: {len(ausgewaehlte_treffer)} Papers an '{kanal['titel']}' gesendet.")
-            time.sleep(2)
-        except Exception as e:
-            print(f"Fehler beim Senden an {kanal['titel']}: {e}")
+        if ausgewaehlte_treffer:
+            parts = [
+                f"<b>📢 PoliSci Ticker: {kanal['titel']}</b>\n"
+                f"<i>Ausgabe vom {datum_str} ({len(ausgewaehlte_treffer)} Papers):</i>\n"
+            ]
+            
+            for idx, p in enumerate(ausgewaehlte_treffer, start=1):
+                titel = html.escape(p.get("title") or "Ohne Titel")
+                link = p.get("doi") or (p.get("primary_location") or {}).get("landing_page_url") or ""
+                ist_oa = p.get("open_access", {}).get("is_oa", False)
+                oa_badge = "🟢 OA" if ist_oa else "🔒 Paywall"
+
+                autoren_liste = [a["author"]["display_name"] for a in p.get("authorships", []) or []]
+                autor_text = f"{autoren_liste[0]} et al." if len(autoren_liste) > 1 else (autoren_liste[0] if autoren_liste else "Unbekannt")
+
+                zeile = f"<b>{idx}. {titel}</b>\n   ✍️ <i>{html.escape(autor_text)}</i> • {oa_badge}"
+                if link:
+                    zeile += f" • <a href='{link}'>Link</a>"
+                parts.append(zeile)
+
+            parts.append(
+                f"\n<i>🔍 Abstracts, Filter & Volltexte in der Web-App:</i>\n"
+                f"👉 <a href='{APP_URL}'>PoliSci Newsticker öffnen</a>"
+            )
+
+            try:
+                sende_telegram(chat_id, "\n\n".join(parts))
+                bereits_belieferte_chats.add(chat_id)
+                print(f"OK: {len(ausgewaehlte_treffer)} Papers an '{kanal['titel']}' gesendet.")
+                time.sleep(2)
+            except Exception as e:
+                print(f"Fehler beim Senden an {kanal['titel']}: {e}")
+        else:
+            print(f"Keine Treffer für '{kanal['titel']}'.")
+
+    except Exception as e:
+        print(f"Unerwarteter Fehler bei Kanal '{kanal['titel']}': {e}")
 
 if gesamt_neue_ids:
     speichere_neue_ids(gesehene_ids, gesamt_neue_ids)
