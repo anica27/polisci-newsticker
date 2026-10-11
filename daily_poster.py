@@ -13,6 +13,7 @@ DetectorFactory.seed = 0
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 APP_URL = "https://polisci-ticker.streamlit.app"
 SEEN_FILE = "seen_ids.txt"
+MAILTO = os.environ.get("OPENALEX_MAILTO")
 
 if not BOT_TOKEN:
     print("TELEGRAM_BOT_TOKEN fehlt.")
@@ -187,7 +188,7 @@ for kanal in KANAELE:
         "filter": filter_string,
         "sort": "publication_date:desc",
         "per_page": 100,
-        "mailto": "research-ticker@example.com"
+        "mailto": MAILTO
     }
 
     try:
