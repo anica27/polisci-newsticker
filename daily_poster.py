@@ -18,9 +18,11 @@ MAILTO = os.environ.get("OPENALEX_MAILTO")
 if not BOT_TOKEN:
     print("TELEGRAM_BOT_TOKEN fehlt.")
     sys.exit(0)
+if not MAILTO:
+    print("Fehler: OPENALEX_MAILTO fehlt. Bitte als GitHub Secret hinterlegen.")
+    sys.exit(1)
 
-# Disziplinübergreifender Ausschluss: Naturwissenschaften, Medizin, BWL, Makroökonomie & Bankenmechanik
-# 1. Strikter globaler Ausschluss (Medizin, Naturwissenschaft, BWL & Konsumforschung)
+# Disziplinübergreifender Ausschluss: Naturwissenschaften, Medizin, BWL & Paratexte
 GLOBAL_AUSSCHLUSS = [
     # Medizin & Biologie
     "synaptic", "swallowing", "breathing", "diaphragm", "carotid",
@@ -40,13 +42,13 @@ UNERWUENSCHTE_TITEL = {
     "contents", "editorial", "book reviews", "front matter", "back matter"
 }
 
-# 2. Fachkanäle (exakt nach deiner app.py-Struktur, nur T11997 und T10718 bereinigt)
+# 6 trennscharfe Fachkanäle (überall einheitlich "exclude_terms")
 KANAELE = [
     {
         "titel": "Internationale Beziehungen & Sicherheitspolitik",
         "chat_id": os.environ.get("CHAT_ID_IB"),
         "topics": "T10053",
-        "exclude": [
+        "exclude_terms": [
             "epistemology", "metaphysics", "formal logic", "household survey",
             "world bank", "surveillance review", "procurement", "visual essay",
             "fertility", "microfinance"
@@ -56,7 +58,7 @@ KANAELE = [
         "titel": "Vergleichende Regierungslehre, Wahlen & Parteien",
         "chat_id": os.environ.get("CHAT_ID_VERGLEICH"),
         "topics": "T10108|T11397|T11742",
-        "exclude": ["metaphysics", "theology", "macroeconomics"]
+        "exclude_terms": ["metaphysics", "theology", "macroeconomics"]
     },
     {
         "titel": "Politische Theorie & Ideengeschichte",
@@ -67,7 +69,7 @@ KANAELE = [
             "econometric", "consumer", "accounting", "banking", "policy making",
             # Medizin & Bioethik
             "neonatal", "biobank", "clinical", "hiv", "general practice", "participants' altruism", "trial",
-            # IB & Außenpolitik (gehört in Kanal 1)
+            # IB & Außenpolitik
             "peacekeeping", "security council", "gaza", "united nations", "r2p", "asymmetric warfare", "foreign policy"
         ]
     },
@@ -78,7 +80,7 @@ KANAELE = [
         "exclude_terms": [
             "habermas", "adorno", "hegel", "kant's", "theology",
             "external action", "foreign policy",
-            # EU-, Europa- & Integrationsbegriffe vollständig sperren:
+            # EU-Exklusion
             "europe", "european", "brexit", "euro", "eurosceptic", "euroscepticism",
             "spinelli", "trilogues", "commission", "council of europe", "subsidiarity"
         ]
@@ -91,14 +93,13 @@ KANAELE = [
             "eu", "european union", "european commission", "european parliament",
             "council of the european", "integration", "europeanization", "brussels", "member state"
         ],
-        "exclude": ["epistemology", "theology"]
+        "exclude_terms": ["epistemology", "theology"]
     },
     {
         "titel": "Politische Soziologie, Partizipation & Protest",
         "chat_id": os.environ.get("CHAT_ID_SOZIOLOGIE"),
-        # T13135 (Bewegungen) & T13982 (Zivilgesellschaft) - T11997 (Kognitions-Agency) entfernt!
         "topics": "T13135|T13982",
-        "exclude": [
+        "exclude_terms": [
             "econometric", "consumer", "firm performance", "taxation",
             "fiscal", "tax law", "tax evasion", "revenue extraction", "better regulation"
         ]
@@ -158,6 +159,11 @@ start_datum = (heute - datetime.timedelta(days=60)).strftime("%Y-%m-%d")
 
 bereits_belieferte_chats = set()
 
+# Individueller User-Agent für den Polite Pool (liest dynamisch dein GitHub Secret)
+headers = {
+    "User-Agent": f"PoliSciDailyPoster/1.0 (mailto:{MAILTO})"
+}
+
 for kanal in KANAELE:
     print(f"\n--- Bearbeite Kanal: {kanal['titel']} ---")
     chat_id = kanal.get("chat_id")
@@ -192,12 +198,16 @@ for kanal in KANAELE:
     }
 
     try:
-        res = requests.get("https://api.openalex.org/works", params=params, timeout=15)
+        # Request mit eigenem User-Agent-Header
+        res = requests.get("https://api.openalex.org/works", params=params, headers=headers, timeout=20)
         res.raise_for_status()
         roh_treffer = res.json().get("results", [])
         print(f"OpenAlex lieferte {len(roh_treffer)} Roh-Treffer für {kanal['titel']}")
+        # 1 Sekunde Pause, um Burst-Limits zu vermeiden
+        time.sleep(1)
     except Exception as e:
         print(f"Fehler bei OpenAlex für {kanal['titel']}: {e}")
+        time.sleep(2)
         continue
 
     ausgewaehlte_treffer = []
@@ -220,12 +230,9 @@ for kanal in KANAELE:
             # Antworten, Debattenbeiträge und Länderberichte abfangen:
             if any(muster in titel_lower for muster in ["reply to", "response to", "responses to", "country report"]):
                 continue
-            # Für Public Policy: Jegliche EU-Bezüge strikt in den EU-Kanal verbannen:
+            # Für Public Policy: EU-Themen strikt sperren:
             if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
-                if re.search(r"\beu\b", titel_lower) or "european" in titel_lower:
-                    continue
-            if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
-                if re.search(r'\b(eu|emu)\b', titel_lower) or any(w in titel_lower for w in ["europe", "brexit", "eurosceptic"]):
+                if re.search(r"\b(eu|emu)\b", titel_lower) or any(w in titel_lower for w in ["europe", "european", "brexit", "eurosceptic"]):
                     continue
             if any(term in titel_lower for term in kanal_ausschluss):
                 continue
@@ -265,12 +272,9 @@ for kanal in KANAELE:
                 # Antworten, Debattenbeiträge und Länderberichte abfangen:
                 if any(muster in titel_lower for muster in ["reply to", "response to", "responses to", "country report"]):
                     continue
-                # Für Public Policy: Jegliche EU-Bezüge strikt in den EU-Kanal verbannen:
+                # Für Public Policy: EU-Themen strikt sperren:
                 if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
-                    if re.search(r"\beu\b", titel_lower) or "european" in titel_lower:
-                        continue
-                if kanal["titel"] == "Public Policy & Verwaltungswissenschaft":
-                     if re.search(r'\b(eu|emu)\b', titel_lower) or any(w in titel_lower for w in ["europe", "brexit", "eurosceptic"]):
+                    if re.search(r"\b(eu|emu)\b", titel_lower) or any(w in titel_lower for w in ["europe", "european", "brexit", "eurosceptic"]):
                         continue
                 if any(term in titel_lower for term in kanal_ausschluss):
                     continue
@@ -281,7 +285,6 @@ for kanal in KANAELE:
                 if p_id in gesehene_ids or p_id in gesamt_neue_ids:
                     continue
 
-                # Bereits in Durchlauf 1 ausgewählte Paper überspringen
                 if any(x.get("id") == p_id for x in ausgewaehlte_treffer):
                     continue
 
@@ -320,7 +323,6 @@ for kanal in KANAELE:
                 sende_telegram(chat_id, "\n\n".join(parts))
                 bereits_belieferte_chats.add(chat_id)
 
-                # Erst NACH erfolgreichem Senden werden die IDs als "gesehen" markiert
                 for p in ausgewaehlte_treffer:
                     p_id = p.get("id")
                     if p_id:
