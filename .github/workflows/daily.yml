@@ -24,15 +24,14 @@ jobs:
       - name: Skript ausführen
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPENALEX_MAILTO: ${{ secrets.OPENALEX_MAILTO }}
           CHAT_ID_IB: ${{ secrets.CHAT_ID_IB }}
           CHAT_ID_VERGLEICH: ${{ secrets.CHAT_ID_VERGLEICH }}
           CHAT_ID_THEORIE: ${{ secrets.CHAT_ID_THEORIE }}
           CHAT_ID_POLICY: ${{ secrets.CHAT_ID_POLICY }}
           CHAT_ID_EU: ${{ secrets.CHAT_ID_EU }}
           CHAT_ID_SOZIOLOGIE: ${{ secrets.CHAT_ID_SOZIOLOGIE }}
-          OPENALEX_MAILTO: ${{ secrets.OPENALEX_MAILTO }}
-        run: |
-          python daily_poster.py
+        run: python daily_poster.py
 
       - name: Gesehene IDs ins Repository committen
         run: |
