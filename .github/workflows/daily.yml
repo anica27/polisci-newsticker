@@ -2,8 +2,13 @@ name: Tägliche Publikationen senden
 
 on:
   schedule:
-    - cron: '57 11 * * *'
+    # 06:17 UTC entspricht 07:17 MEZ (Winterzeit) bzw. 08:17 MESZ (Sommerzeit).
+    # Eine "krumme" Minute wie 17 vermeidet Runner-Warteschlangen um die volle Stunde.
+    - cron: '17 6 * * *'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   post-to-telegram:
@@ -11,17 +16,21 @@ jobs:
     steps:
       - name: Code auschecken
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Python einrichten
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Abhängigkeiten installieren
         run: |
-          pip install requests langdetect
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Skript ausführen
+      - name: Daily Poster ausführen
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENALEX_MAILTO: ${{ secrets.OPENALEX_MAILTO }}
@@ -33,11 +42,20 @@ jobs:
           CHAT_ID_SOZIOLOGIE: ${{ secrets.CHAT_ID_SOZIOLOGIE }}
         run: python daily_poster.py
 
-      - name: Gesehene IDs ins Repository committen
+      - name: Gesehene IDs konfliktfrei ins Repository committen
+        # if: always() stellt sicher, dass bereits gesendete IDs auch bei Teilfehlern committet werden
+        if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add seen_ids.txt
-          git commit -m "Auto: Update seen_ids.txt" || echo "Keine Änderungen zu committen"
-          git push
-     
+          
+          if [ -f seen_ids.txt ] && git status --porcelain seen_ids.txt | grep -q seen_ids.txt; then
+            git add seen_ids.txt
+            git commit -m "Auto: Update seen_ids.txt [skip ci]"
+            # Rebase verhindert Push-Konflikte, falls zeitgleich Änderungen gepusht wurden
+            git pull --rebase origin ${{ github.ref_name }}
+            git push origin ${{ github.ref_name }}
+            echo "seen_ids.txt erfolgreich synchronisiert."
+          else
+            echo "Keine Änderungen an seen_ids.txt zu committen."
+          fi
